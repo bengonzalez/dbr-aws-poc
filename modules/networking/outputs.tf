@@ -20,3 +20,8 @@ output "databricks_security_group_id" {
   description = "Security group ID for Databricks compute"
   value       = aws_security_group.databricks.id
 }
+
+output "private_route_table_id" {
+  description = "ID of the private route table"
+  value       = aws_route_table.private.id
+}

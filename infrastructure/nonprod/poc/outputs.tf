@@ -1,4 +1,4 @@
-# Network outputs
+# Networking outputs
 output "vpc_id" {
   description = "ID of the POC VPC"
   value       = module.networking.vpc_id
@@ -17,6 +17,11 @@ output "private_subnet_ids" {
 output "databricks_security_group_id" {
   description = "Security group intended for Databricks compute"
   value       = module.networking.databricks_security_group_id
+}
+
+output "private_route_table_id" {
+  description = "ID of the private route table"
+  value       = module.networking.private_route_table_id
 }
 
 # KMS outputs

@@ -28,3 +28,14 @@ module "security" {
   kms_key_arn     = module.kms.kms_key_arn
   data_bucket_arn = module.storage.data_bucket_arn
 }
+
+module "endpoints" {
+  source = "../../../modules/endpoints"
+
+  project_name = var.project_name
+  vpc_id       = module.networking.vpc_id
+
+  route_table_ids = [
+    module.networking.private_route_table_id
+  ]
+}
