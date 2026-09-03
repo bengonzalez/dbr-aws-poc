@@ -26,3 +26,8 @@ variable "private_subnet_cidr" {
   type        = list(string)
   default     = ["10.20.10.0/24", "10.20.11.0/24"]
 }
+
+variable "bucket_suffix" {
+  description = "Unique suffix for globally unique AWS resource names"
+  type        = string
+}
