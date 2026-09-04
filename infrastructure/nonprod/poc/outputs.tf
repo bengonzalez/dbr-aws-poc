@@ -24,6 +24,17 @@ output "private_route_table_id" {
   value       = module.networking.private_route_table_id
 }
 
+# Endpoints outputs
+output "kms_endpoint_id" {
+  description = "ID of the KMS VPC endpoint"
+  value       = module.endpoints.kms_endpoint_id
+}
+
+output "endpoint_security_group_id" {
+  description = "Security group ID used by interface VPC endpoints"
+  value       = module.endpoints.endpoint_security_group_id
+}
+
 # KMS outputs
 output "kms_key_id" {
   description = "ID of the Databricks KMS key"

@@ -34,6 +34,10 @@ module "endpoints" {
 
   project_name = var.project_name
   vpc_id       = module.networking.vpc_id
+  aws_region   = var.aws_region
+  vpc_cidr     = var.vpc_cidr
+
+  private_subnet_ids = module.networking.private_subnet_ids
 
   route_table_ids = [
     module.networking.private_route_table_id
