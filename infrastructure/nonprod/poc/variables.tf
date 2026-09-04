@@ -1,3 +1,9 @@
+variable "databricks_account_id" {
+  description = "Databricks account ID used as the external ID for the Databricks AWS cross-account role"
+  type        = string
+  sensitive   = true
+}
+
 variable "aws_region" {
   description = "AWS region for the POC"
   type        = string

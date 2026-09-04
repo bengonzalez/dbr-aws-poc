@@ -24,9 +24,13 @@ module "storage" {
 module "security" {
   source = "../../../modules/security"
 
-  project_name    = var.project_name
-  kms_key_arn     = module.kms.kms_key_arn
-  data_bucket_arn = module.storage.data_bucket_arn
+  project_name                 = var.project_name
+  aws_region                   = var.aws_region
+  vpc_id                       = module.networking.vpc_id
+  databricks_security_group_id = module.networking.databricks_security_group_id
+  kms_key_arn                  = module.kms.kms_key_arn
+  data_bucket_arn              = module.storage.data_bucket_arn
+  databricks_account_id        = var.databricks_account_id
 }
 
 module "endpoints" {
