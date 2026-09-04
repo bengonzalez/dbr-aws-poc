@@ -1,12 +1,52 @@
 resource "aws_vpc_endpoint" "s3" {
   vpc_id            = var.vpc_id
-  service_name = "com.amazonaws.${var.aws_region}.s3"
+  service_name      = "com.amazonaws.${var.aws_region}.s3"
   vpc_endpoint_type = "Gateway"
   route_table_ids   = var.route_table_ids
+  policy            = data.aws_iam_policy_document.s3_endpoint.json
 
   tags = {
     Name    = "${var.project_name}-s3-endpoint"
     Project = var.project_name
+  }
+}
+
+# Endpoint policy for the S3 VPC endpoint to allow access to the data bucket
+data "aws_iam_policy_document" "s3_endpoint" {
+  statement {
+    effect = "Allow"
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    actions = [
+      "s3:ListBucket"
+    ]
+
+    resources = [
+      var.data_bucket_arn
+    ]
+  }
+
+  statement {
+    effect = "Allow"
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject",
+      "s3:DeleteObject"
+    ]
+
+    resources = [
+      "${var.data_bucket_arn}/*"
+    ]
   }
 }
 
@@ -36,9 +76,9 @@ resource "aws_vpc_security_group_ingress_rule" "interface_endpoints_https" {
 resource "aws_vpc_endpoint" "kms" {
   vpc_id = var.vpc_id
 
-  service_name = "com.amazonaws.${var.aws_region}.kms"
+  service_name      = "com.amazonaws.${var.aws_region}.kms"
   vpc_endpoint_type = "Interface"
-  subnet_ids = var.private_subnet_ids
+  subnet_ids        = var.private_subnet_ids
 
   security_group_ids = [
     aws_security_group.interface_endpoints.id

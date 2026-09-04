@@ -27,3 +27,8 @@ variable "vpc_cidr" {
   description = "CIDR block allowed to access interface VPC endpoints"
   type        = string
 }
+
+variable "data_bucket_arn" {
+  description = "ARN of the S3 data bucket allowed through the VPC endpoint"
+  type        = string
+}
