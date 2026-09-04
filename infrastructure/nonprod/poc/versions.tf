@@ -6,5 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+
+    databricks = {
+      source  = "databricks/databricks"
+      version = "~> 1.130"
+    }
   }
 }
