@@ -48,3 +48,10 @@ module "endpoints" {
     module.networking.private_route_table_id
   ]
 }
+
+resource "databricks_mws_credentials" "workspace" {
+  provider = databricks.mws
+
+  credentials_name = "${var.project_name}-credentials"
+  role_arn         = module.security.databricks_workspace_role_arn
+}

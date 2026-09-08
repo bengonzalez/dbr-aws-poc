@@ -114,7 +114,8 @@ data "aws_iam_policy_document" "databricks_workspace_assume_role" {
       type = "AWS"
 
       identifiers = [
-        "arn:aws:iam::414351767826:role/unity-catalog-prod-UCMasterRole-14S5ZJVKOTYTL"
+        "arn:aws:iam::414351767826:role/unity-catalog-prod-UCMasterRole-14S5ZJVKOTYTL",
+        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-workspace-role"
       ]
     }
 
