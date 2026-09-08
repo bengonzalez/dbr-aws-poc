@@ -71,3 +71,8 @@ output "databricks_role_arn" {
   description = "ARN of the Databricks IAM role"
   value       = module.security.databricks_role_arn
 }
+
+output "databricks_workspace_role_arn" {
+  description = "ARN of the Databricks workspace cross-account IAM role"
+  value       = module.security.databricks_workspace_role_arn
+}

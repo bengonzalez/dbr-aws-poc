@@ -4,6 +4,12 @@ variable "databricks_account_id" {
   sensitive   = true
 }
 
+variable "databricks_profile" {
+  description = "Databricks profile name for the Databricks provider"
+  type        = string
+  sensitive   = true
+}
+
 variable "aws_region" {
   description = "AWS region for the POC"
   type        = string
