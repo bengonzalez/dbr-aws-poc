@@ -12,3 +12,8 @@ variable "bucket_suffix" {
   description = "Unique suffix used to ensure the S3 bucket name is globally unique"
   type        = string
 }
+
+variable "databricks_account_id" {
+  description = "Databricks account ID used to generate the restrictive root bucket policy"
+  type        = string
+}

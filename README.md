@@ -1,64 +1,55 @@
 # POC for Databricks deployment in AWS
 
+### So far:  
 
-### What we will build in personal AWS Account:  
-┌───────────────────────────────────────────────┐  
-│              Personal AWS Account             │  
-│                                               │  
-│  ┌─────────────────────────────────────────┐  │  
-│  │                  VPC                    │  │  
-│  │                                         │  │  
-│  │  Public             Private             │  │  
-│  │  ┌───────┐          ┌───────────────┐   │  │  
-│  │  │ NAT   │──────────│  Databricks   │   │  │  
-│  │  └───────┘          │   Compute     │   │  │  
-│  │                     └───────┬───────┘   │  │  
-│  │                             │           │  │  
-│  │                     ┌───────▼───────┐   │  │  
-│  │                     │      S3       │   │  │  
-│  │                     └───────────────┘   │  │  
-│  │                                         │  │  
-│  │  KMS │ CloudTrail │ Flow Logs │ IAM     │  │  
-│  └─────────────────────────────────────────┘  │  
-└───────────────────────────────────────────────┘  
+What we have before we get the
+```  
+AWS VPC  
+├── Public subnet  
+├── Private subnet A  
+├── Private subnet B  
+├── NAT Gateway  
+├── Databricks security group  
+├── S3 Gateway endpoint  
+└── KMS Interface endpoint  
+  
+S3  
+├── databricks-poc-data-556940913059  
+│   └── Existing encrypted data bucket  
+│  
+└── databricks-poc-root-556940913059  
+    └── Databricks workspace root storage  
+        ├── Versioning  
+        ├── Public access blocked  
+        ├── Bucket owner enforced  
+        ├── SSE-S3  
+        └── Databricks-generated bucket policy  
+  
+Databricks Account  
+├── Credentials configuration  
+│   └── databricks-poc-credentials  
+│  
+└── Storage configuration  
+    └── databricks-poc-storage  
+```
 
-### Target TSA Architecture:  
-                     DHS / TSA
-                         │
-                    Enterprise IdP
-                         │
-                        SSO
-                         │
-                         ▼
-              ┌─────────────────────┐
-              │ DHS/TSA Network     │
-              └──────────┬──────────┘
-                         │
-                  Private Connectivity
-                         │
-                         ▼
-══════════════════════════════════════════════════
-                 AWS GOVCLOUD
-══════════════════════════════════════════════════
-                         │
-                  ┌──────▼───────┐
-                  │     VPC      │
-                  │              │
-                  │ Private      │
-                  │ Subnets      │
-                  │              │
-                  │ ┌──────────┐ │
-                  │ │Databricks│ │
-                  │ └────┬─────┘ │
-                  │      │       │
-                  │ PrivateLink  │
-                  │      │       │
-                  │ ┌────▼────┐  │
-                  │ │   S3    │  │
-                  │ └─────────┘  │
-                  │              │
-                  │ KMS          │
-                  │ CloudTrail   │
-                  │ Flow Logs    │
-                  └──────────────┘
-
+Progression:
+```
+Credentials
+    ↓
+Storage
+    ↓
+Network
+    ↓
+Encryption / CMK
+    ↓
+Workspace
+```
+Where we are:
+```
+Credentials ✅
+Storage     ✅
+Network     ← NEXT
+CMK         ← after network
+Workspace   ← later
+```

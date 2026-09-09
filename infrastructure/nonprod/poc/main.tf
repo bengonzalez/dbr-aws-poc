@@ -16,9 +16,14 @@ module "kms" {
 module "storage" {
   source = "../../../modules/storage"
 
-  project_name  = var.project_name
-  kms_key_arn   = module.kms.kms_key_arn
-  bucket_suffix = var.bucket_suffix
+  providers = {
+    databricks = databricks.mws
+  }
+
+  project_name          = var.project_name
+  kms_key_arn           = module.kms.kms_key_arn
+  bucket_suffix         = var.bucket_suffix
+  databricks_account_id = var.databricks_account_id
 }
 
 module "security" {
@@ -54,4 +59,12 @@ resource "databricks_mws_credentials" "workspace" {
 
   credentials_name = "${var.project_name}-credentials"
   role_arn         = module.security.databricks_workspace_role_arn
+}
+
+resource "databricks_mws_storage_configurations" "workspace" {
+  provider = databricks.mws
+
+  account_id                 = var.databricks_account_id
+  storage_configuration_name = "${var.project_name}-storage"
+  bucket_name                = module.storage.root_bucket_id
 }
