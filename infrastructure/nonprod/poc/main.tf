@@ -10,7 +10,9 @@ module "networking" {
 module "kms" {
   source = "../../../modules/kms"
 
-  project_name = var.project_name
+  project_name                  = var.project_name
+  databricks_account_id         = var.databricks_account_id
+  databricks_cross_account_role = module.security.databricks_workspace_role_arn
 }
 
 module "storage" {
@@ -67,4 +69,14 @@ resource "databricks_mws_storage_configurations" "workspace" {
   account_id                 = var.databricks_account_id
   storage_configuration_name = "${var.project_name}-storage"
   bucket_name                = module.storage.root_bucket_id
+}
+
+resource "databricks_mws_networks" "workspace" {
+  provider = databricks.mws
+
+  account_id         = var.databricks_account_id
+  network_name       = "${var.project_name}-network"
+  vpc_id             = module.networking.vpc_id
+  subnet_ids         = module.networking.private_subnet_ids
+  security_group_ids = [module.networking.databricks_security_group_id]
 }
