@@ -80,3 +80,26 @@ resource "databricks_mws_networks" "workspace" {
   subnet_ids         = module.networking.private_subnet_ids
   security_group_ids = [module.networking.databricks_security_group_id]
 }
+
+#
+# The following resource is used to create a customer-managed KMS key in Databricks. 
+# It references the KMS key created in the `kms` module and associates it with the Databricks 
+# account for use cases such as storage encryption.
+# 
+# THIS WILL BE COMMENTED OUT FOR NOW, AS IT REQUIRES A DATABRICKS ENTERPRISE ACCOUNT TO FUNCTION PROPERLY.
+#
+# resource "databricks_mws_customer_managed_keys" "storage" {
+#   provider   = databricks.mws
+#   account_id = var.databricks_account_id
+
+#   aws_key_info {
+#     key_arn   = module.kms.kms_key_arn
+#     key_alias = "alias/${var.project_name}"
+#   }
+
+#   use_cases = ["STORAGE"]
+
+#   depends_on = [
+#     module.kms
+#   ]
+# }
