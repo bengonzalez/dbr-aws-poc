@@ -61,6 +61,10 @@ resource "databricks_mws_credentials" "workspace" {
 
   credentials_name = "${var.project_name}-credentials"
   role_arn         = module.security.databricks_workspace_role_arn
+
+  depends_on = [
+    time_sleep.wait_for_iam_propagation
+  ]
 }
 
 resource "databricks_mws_storage_configurations" "workspace" {
@@ -81,25 +85,65 @@ resource "databricks_mws_networks" "workspace" {
   security_group_ids = [module.networking.databricks_security_group_id]
 }
 
+resource "time_sleep" "wait_for_iam_propagation" {
+  depends_on = [
+    module.security
+  ]
+
+  create_duration = "30s"
+}
+
+resource "databricks_mws_workspaces" "workspace" {
+  provider       = databricks.mws
+  account_id     = var.databricks_account_id
+  workspace_name = var.project_name
+  aws_region     = var.aws_region
+
+  credentials_id           = databricks_mws_credentials.workspace.credentials_id
+  storage_configuration_id = databricks_mws_storage_configurations.workspace.storage_configuration_id
+  network_id               = databricks_mws_networks.workspace.network_id
+
+  storage_customer_managed_key_id = var.enable_databricks_storage_cmk ? databricks_mws_customer_managed_keys.storage[0].customer_managed_key_id : null
+
+  timeouts {
+    create = "30m"
+    read   = "10m"
+    update = "20m"
+  }
+
+  depends_on = [
+    time_sleep.wait_for_iam_propagation
+  ]
+}
+
 #
-# The following resource is used to create a customer-managed KMS key in Databricks. 
-# It references the KMS key created in the `kms` module and associates it with the Databricks 
+# The following resource is used to create a customer-managed KMS key in Databricks.
+# It references the KMS key created in the `kms` module and associates it with the Databricks
 # account for use cases such as storage encryption.
-# 
-# THIS WILL BE COMMENTED OUT FOR NOW, AS IT REQUIRES A DATABRICKS ENTERPRISE ACCOUNT TO FUNCTION PROPERLY.
 #
-# resource "databricks_mws_customer_managed_keys" "storage" {
-#   provider   = databricks.mws
-#   account_id = var.databricks_account_id
+# This is toggled by the `enable_databricks_storage_cmk` variable, allowing users to enable or disable
+# the use of a customer-managed key for Databricks workspace storage.
+#
+resource "databricks_mws_customer_managed_keys" "storage" {
+  count = var.enable_databricks_storage_cmk ? 1 : 0
 
-#   aws_key_info {
-#     key_arn   = module.kms.kms_key_arn
-#     key_alias = "alias/${var.project_name}"
-#   }
+  provider   = databricks.mws
+  account_id = var.databricks_account_id
 
-#   use_cases = ["STORAGE"]
+  aws_key_info {
+    key_arn   = module.kms.kms_key_arn
+    key_alias = "alias/${var.project_name}"
+  }
 
-#   depends_on = [
-#     module.kms
-#   ]
-# }
+  use_cases = ["STORAGE"]
+
+  depends_on = [
+    module.kms
+  ]
+}
+
+data "databricks_aws_crossaccount_policy" "workspace_expected" {
+  provider = databricks.mws
+
+  policy_type = "customer"
+}

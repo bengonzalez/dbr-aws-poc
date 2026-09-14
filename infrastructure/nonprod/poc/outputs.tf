@@ -76,3 +76,14 @@ output "databricks_workspace_role_arn" {
   description = "ARN of the Databricks workspace cross-account IAM role"
   value       = module.security.databricks_workspace_role_arn
 }
+
+output "databricks_workspace_url" {
+  description = "URL of the Databricks workspace"
+  value       = databricks_mws_workspaces.workspace.workspace_url
+}
+
+output "databricks_expected_crossaccount_policy" {
+  description = "Databricks-generated cross-account IAM policy for comparison"
+  value       = data.databricks_aws_crossaccount_policy.workspace_expected.json
+  sensitive   = true
+}

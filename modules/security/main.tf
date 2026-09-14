@@ -1,13 +1,13 @@
 data "aws_caller_identity" "current" {}
 
 /*
-For our initial POC, we're using EC2 as the trusted service 
+For our initial POC, we're using EC2 as the trusted service
 because Databricks classic compute ultimately runs on AWS compute resources.
 
-Important: this is an initial POC trust relationship. 
-We will revisit the exact Databricks trust configuration 
-when we integrate the actual Databricks workspace. 
-I don't want us to prematurely lock the architecture 
+Important: this is an initial POC trust relationship.
+We will revisit the exact Databricks trust configuration
+when we integrate the actual Databricks workspace.
+I don't want us to prematurely lock the architecture
 to an incorrect Databricks-specific trust relationship.
 */
 
@@ -112,10 +112,8 @@ data "aws_iam_policy_document" "databricks_workspace_assume_role" {
 
     principals {
       type = "AWS"
-
       identifiers = [
-        "arn:aws:iam::414351767826:role/unity-catalog-prod-UCMasterRole-14S5ZJVKOTYTL",
-        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-workspace-role"
+        "arn:aws:iam::414351767826:root"
       ]
     }
 
