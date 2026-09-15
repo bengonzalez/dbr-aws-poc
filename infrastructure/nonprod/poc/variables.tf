@@ -43,3 +43,9 @@ variable "bucket_suffix" {
   description = "Unique suffix for globally unique AWS resource names"
   type        = string
 }
+
+variable "enable_databricks_storage_cmk" {
+  description = "Enable Databricks customer-managed key for workspace storage"
+  type        = bool
+  default     = false
+}
