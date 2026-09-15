@@ -143,6 +143,42 @@ resource "aws_iam_role" "databricks_workspace" {
   }
 }
 
+data "databricks_aws_unity_catalog_assume_role_policy" "data_access" {
+  aws_account_id = data.aws_caller_identity.current.account_id
+  role_name      = "${var.project_name}-data-access-role"
+  external_id    = var.unity_catalog_external_id
+}
+
+resource "aws_iam_role" "databricks_data_access" {
+  name = "${var.project_name}-data-access-role"
+
+  assume_role_policy = data.databricks_aws_unity_catalog_assume_role_policy.data_access.json
+
+  tags = {
+    Name    = "${var.project_name}-data-access-role"
+    Project = var.project_name
+  }
+}
+
+data "databricks_aws_unity_catalog_policy" "data_access" {
+  aws_account_id = data.aws_caller_identity.current.account_id
+  bucket_name    = split(":", var.data_bucket_arn)[5]
+  role_name      = "${var.project_name}-data-access-role"
+  kms_name      = var.kms_key_arn
+}
+
+resource "aws_iam_policy" "databricks_data_access" {
+  name        = "${var.project_name}-data-access"
+  description = "Unity Catalog S3 and KMS access for ${var.project_name}"
+
+  policy = data.databricks_aws_unity_catalog_policy.data_access.json
+}
+
+resource "aws_iam_role_policy_attachment" "databricks_data_access" {
+  role       = aws_iam_role.databricks_data_access.name
+  policy_arn = aws_iam_policy.databricks_data_access.arn
+}
+
 data "aws_iam_policy_document" "databricks_workspace_permissions" {
   statement {
     sid    = "NonResourceBasedPermissions"

@@ -38,6 +38,7 @@ module "security" {
   kms_key_arn                  = module.kms.kms_key_arn
   data_bucket_arn              = module.storage.data_bucket_arn
   databricks_account_id        = var.databricks_account_id
+  unity_catalog_external_id    = var.unity_catalog_external_id
 }
 
 module "endpoints" {
