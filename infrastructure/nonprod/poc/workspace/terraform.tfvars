@@ -1,0 +1,6 @@
+project_name                 = "databricks-poc"
+databricks_workspace_url     = "https://dbc-b8953b54-e421.cloud.databricks.com"
+databricks_profile           = "dbc-b8953b54-e421"
+data_bucket_name             = "databricks-poc-data-556940913059"
+databricks_data_access_role_arn = "arn:aws:iam::556940913059:role/databricks-poc-data-access-role"
+unity_catalog_external_id    = "d2dbaf5d-b261-4012-92eb-2abdd39c8bfd"
