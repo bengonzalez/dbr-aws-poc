@@ -36,8 +36,12 @@ output "resolved_network" {
 output "workspace_configuration" {
   description = "Resolved workspace configuration used by the factory."
   value = {
-    workspace   = var.workspace
-    cloud       = var.cloud
+    workspace = var.workspace
+    cloud = {
+      provider = var.cloud.provider
+      region   = var.cloud.region
+      account  = data.aws_caller_identity.current.account_id
+    }
     application = var.application
     ownership   = var.ownership
     network     = local.resolved_network

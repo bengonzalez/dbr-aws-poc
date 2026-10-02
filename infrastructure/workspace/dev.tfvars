@@ -7,7 +7,6 @@ workspace = {
 cloud = {
   provider = "aws"
   region   = "us-east-1"
-  account  = "123456789012"
 }
 
 application = {

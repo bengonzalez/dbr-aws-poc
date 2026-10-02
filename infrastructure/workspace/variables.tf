@@ -31,7 +31,6 @@ variable "cloud" {
   type = object({
     provider = string
     region   = string
-    account  = string
   })
 
   validation {
