@@ -67,9 +67,33 @@ variable "network" {
     strategy     = string
     architecture = string
 
-    vpc_id             = optional(string)
-    private_subnet_ids = optional(list(string))
-    security_group_id  = optional(string)
+    vpc = object({
+      ownership = string
+      id        = optional(string)
+    })
+
+    subnets = object({
+      ownership = string
+
+      private = optional(list(object({
+        cidr              = optional(string)
+        availability_zone = optional(string)
+        id                = optional(string)
+      })))
+    })
+
+    routing = object({
+      ownership = string
+    })
+
+    security_groups = object({
+      ownership = string
+      id        = optional(string)
+    })
+
+    endpoints = object({
+      ownership = string
+    })
   })
 
   validation {
@@ -78,21 +102,61 @@ variable "network" {
       var.network.strategy
     )
 
-    error_message = "network.strategy must be either custom or isolated."
+    error_message = "network.strategy must be custom or isolated."
   }
 
   validation {
-    condition = (
-      var.network.strategy != "custom" ||
-      (
-        var.network.vpc_id != null &&
-        var.network.private_subnet_ids != null &&
-        length(var.network.private_subnet_ids) >= 2 &&
-        var.network.security_group_id != null
-      )
+    condition = contains(
+      ["client_managed", "hybrid", "platform_managed"],
+      var.network.architecture
     )
 
-    error_message = "Custom networking requires vpc_id, at least two private_subnet_ids, and security_group_id."
+    error_message = "network.architecture must be client_managed, hybrid, or platform_managed."
+  }
+
+  validation {
+    condition = contains(
+      ["existing", "terraform"],
+      var.network.vpc.ownership
+    )
+
+    error_message = "VPC ownership must be existing or terraform."
+  }
+
+  validation {
+    condition = contains(
+      ["existing", "terraform"],
+      var.network.subnets.ownership
+    )
+
+    error_message = "Subnet ownership must be existing or terraform."
+  }
+
+  validation {
+    condition = contains(
+      ["existing", "terraform"],
+      var.network.routing.ownership
+    )
+
+    error_message = "Routing ownership must be existing or terraform."
+  }
+
+  validation {
+    condition = contains(
+      ["existing", "terraform"],
+      var.network.security_groups.ownership
+    )
+
+    error_message = "Security group ownership must be existing or terraform."
+  }
+
+  validation {
+    condition = contains(
+      ["existing", "terraform"],
+      var.network.endpoints.ownership
+    )
+
+    error_message = "Endpoint ownership must be existing or terraform."
   }
 }
 

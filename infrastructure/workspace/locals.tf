@@ -18,11 +18,5 @@ locals {
     }
   )
 
-  resolved_network = {
-    strategy           = var.network.strategy
-    architecture       = var.network.architecture
-    vpc_id             = try(var.network.vpc_id, null)
-    private_subnet_ids = try(var.network.private_subnet_ids, [])
-    security_group_id  = try(var.network.security_group_id, null)
-  }
+  resolved_network = var.network
 }

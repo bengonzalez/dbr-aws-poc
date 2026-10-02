@@ -21,16 +21,39 @@ ownership = {
 
 network = {
   strategy     = "custom"
-  architecture = "client_managed"
+  architecture = "hybrid"
 
-  vpc_id = "vpc-xxxxxxxx"
+  vpc = {
+    ownership = "existing"
+    id        = "vpc-xxxxxxxx"
+  }
 
-  private_subnet_ids = [
-    "subnet-xxxxxxxx",
-    "subnet-yyyyyyyy"
-  ]
+  subnets = {
+    ownership = "terraform"
 
-  security_group_id = "sg-xxxxxxxx"
+    private = [
+      {
+        cidr              = "10.20.10.0/24"
+        availability_zone = "us-east-1a"
+      },
+      {
+        cidr              = "10.20.11.0/24"
+        availability_zone = "us-east-1b"
+      }
+    ]
+  }
+
+  routing = {
+    ownership = "terraform"
+  }
+
+  security_groups = {
+    ownership = "terraform"
+  }
+
+  endpoints = {
+    ownership = "terraform"
+  }
 }
 
 data = {

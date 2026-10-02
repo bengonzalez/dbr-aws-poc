@@ -4,8 +4,20 @@ resource "terraform_data" "workspace_configuration" {
     workspace_name       = local.workspace_name
     environment          = local.environment
     network_strategy     = local.resolved_network.strategy
-    vpc_id               = local.resolved_network.vpc_id
-    private_subnet_count = length(local.resolved_network.private_subnet_ids)
-    security_group_id    = local.resolved_network.security_group_id
+    network_architecture = local.resolved_network.architecture
+
+    vpc_ownership = local.resolved_network.vpc.ownership
+
+    subnet_ownership = local.resolved_network.subnets.ownership
+
+    routing_ownership = local.resolved_network.routing.ownership
+
+    security_group_ownership = (
+      local.resolved_network.security_groups.ownership
+    )
+
+    endpoint_ownership = (
+      local.resolved_network.endpoints.ownership
+    )
   }
 }
