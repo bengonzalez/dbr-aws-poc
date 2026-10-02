@@ -1,0 +1,55 @@
+$schema: ../schemas/profile.schema.json
+
+api_version: v1
+
+profile:
+  name: stage
+  version: "1.0"
+  description: Staging and pre-production Databricks workspace
+
+workspace:
+  environment: stage
+  isolation: dedicated
+
+network:
+  strategy: custom
+  architecture: client_managed
+  public_access: false
+  private_connectivity: true
+  databricks_private_link: false
+  private_dns: standard
+
+storage:
+  workspace: dedicated
+  application_data: governed
+
+encryption:
+  workspace: platform_managed
+  application_data: platform_managed
+
+governance:
+  unity_catalog: required
+  catalog_strategy: application_onboarding
+  workspace_catalog_binding: recommended
+  external_locations: controlled
+
+identity:
+  access_model: enterprise_groups
+  service_principals: supported
+  privileged_access: controlled
+
+compute:
+  policy: stage
+
+logging:
+  level: enhanced
+  centralized: true
+
+validation:
+  required: true
+  blocking: true
+  negative_tests: true
+  evidence: standard
+
+lifecycle:
+  mode: controlled

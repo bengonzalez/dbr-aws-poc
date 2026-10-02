@@ -1,0 +1,53 @@
+api_version: v1
+
+profile:
+  name: dev
+  version: "1.0"
+  description: Development Databricks workspace
+
+workspace:
+  environment: dev
+  isolation: dedicated
+
+network:
+  strategy: custom
+  architecture: client_managed
+  public_access: false
+  private_connectivity: true
+  databricks_private_link: false
+  private_dns: standard
+
+storage:
+  workspace: platform_managed
+  application_data: governed
+
+encryption:
+  workspace: platform_managed
+  application_data: platform_managed
+
+governance:
+  unity_catalog: required
+  catalog_strategy: application_onboarding
+  workspace_catalog_binding: optional
+  external_locations: controlled
+
+identity:
+  access_model: enterprise_groups
+  service_principals: supported
+  privileged_access: standard
+
+compute:
+  policy: development
+
+logging:
+  level: standard
+  centralized: true
+
+validation:
+  required: true
+  blocking: false
+  negative_tests: true
+  evidence: standard
+
+lifecycle:
+  mode: flexible

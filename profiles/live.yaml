@@ -1,0 +1,59 @@
+$schema: ../schemas/profile.schema.json
+
+api_version: v1
+
+profile:
+  name: live
+  version: "1.0"
+  description: Production Databricks workspace
+
+workspace:
+  environment: live
+  isolation: dedicated
+
+network:
+  strategy: custom
+  architecture: client_managed
+  public_access: false
+  private_connectivity: true
+  databricks_private_link: true
+  private_dns: required
+
+storage:
+  workspace: dedicated
+  application_data: governed
+
+encryption:
+  workspace: customer_managed
+  application_data: customer_managed
+
+governance:
+  unity_catalog: required
+  catalog_strategy: controlled
+  workspace_catalog_binding: required
+  external_locations: controlled
+
+identity:
+  access_model: enterprise_groups
+  service_principals: required
+  privileged_access: controlled
+
+compute:
+  policy: production
+
+logging:
+  level: enhanced
+  centralized: true
+  audit: required
+
+validation:
+  required: true
+  blocking: true
+  negative_tests: true
+  evidence: required
+
+lifecycle:
+  mode: strict
+
+approval:
+  required: true

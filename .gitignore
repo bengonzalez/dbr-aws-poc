@@ -24,3 +24,6 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+
+# Ignore the .vscode directory, which is used to store project-specific settings for Visual Studio Code.
+.vscode/

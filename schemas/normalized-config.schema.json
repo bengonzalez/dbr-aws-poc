@@ -1,0 +1,285 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "normalized-config.schema.json",
+  "title": "Databricks Workspace Normalized Configuration",
+  "description": "Resolved configuration consumed by the Terraform workspace factory.",
+  "type": "object",
+  "additionalProperties": false,
+
+  "properties": {
+    "api_version": {
+      "type": "string",
+      "const": "v1"
+    },
+
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "string",
+          "enum": [
+            "dev",
+            "stage",
+            "live"
+          ]
+        },
+        "isolation": {
+          "type": "string",
+          "enum": [
+            "dedicated"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "environment",
+        "isolation"
+      ]
+    },
+
+    "cloud": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "aws"
+          ]
+        },
+        "region": {
+          "type": "string"
+        },
+        "account": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "region",
+        "account"
+      ]
+    },
+
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "identifier"
+      ]
+    },
+
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "technical_owner": {
+          "type": "string"
+        },
+        "business_owner": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "technical_owner",
+        "business_owner"
+      ]
+    },
+
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "custom",
+            "isolated"
+          ]
+        },
+        "architecture": {
+          "type": "string",
+          "enum": [
+            "client_managed",
+            "platform_managed"
+          ]
+        },
+        "public_access": {
+          "type": "boolean"
+        },
+        "private_connectivity": {
+          "type": "boolean"
+        },
+        "vpc_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "private_subnet_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "security_group_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "strategy",
+        "architecture",
+        "public_access",
+        "private_connectivity",
+        "vpc_id",
+        "private_subnet_ids",
+        "security_group_id"
+      ]
+    },
+
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "classification": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "classification"
+      ]
+    },
+
+    "encryption": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workspace": {
+          "type": "string"
+        },
+        "application_data": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace",
+        "application_data"
+      ]
+    },
+
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "unity_catalog": {
+          "type": "boolean"
+        },
+        "workspace_binding": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "unity_catalog",
+        "workspace_binding"
+      ]
+    },
+
+    "compute": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "policy": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "policy"
+      ]
+    },
+
+    "logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "type": "string"
+        },
+        "centralized": {
+          "type": "boolean"
+        },
+        "audit": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "level",
+        "centralized",
+        "audit"
+      ]
+    },
+
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "blocking": {
+          "type": "boolean"
+        },
+        "negative_tests": {
+          "type": "boolean"
+        },
+        "evidence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "required",
+        "blocking",
+        "negative_tests",
+        "evidence"
+      ]
+    },
+
+    "tags": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+
+  "required": [
+    "api_version",
+    "workspace",
+    "cloud",
+    "application",
+    "ownership",
+    "network",
+    "data",
+    "encryption",
+    "governance",
+    "compute",
+    "logging",
+    "validation",
+    "tags"
+  ]
+}

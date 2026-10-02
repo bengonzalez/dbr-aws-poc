@@ -1,0 +1,37 @@
+api_version: v1
+
+request:
+  id: REQ-00123
+  submitted_by: application-team
+  source: workspace-request
+
+workspace:
+  name: document-ai-dev
+  environment: dev
+
+cloud:
+  provider: aws
+  region: us-east-1
+
+application:
+  name: Document AI
+  identifier: document-ai
+
+ownership:
+  technical_owner: document-ai-platform
+  business_owner: technology
+
+data:
+  classification: sensitive
+
+network:
+  strategy: custom
+
+tags:
+  cost_center: "12345"
+
+# What this says:
+# I need a development Databricks workspace for the Document AI application in the us-east-1 region on AWS. 
+# The workspace should be dedicated, with a custom network strategy, and the data classification is sensitive. 
+# The technical owner is the document-ai-platform team, and the business owner is the technology department. 
+# The cost center for this request is 12345.

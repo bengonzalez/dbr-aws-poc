@@ -1,0 +1,350 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Databricks Workspace Profile",
+  "description": "Schema for a Databricks workspace provisioning profile.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "api_version",
+    "profile",
+    "workspace",
+    "network",
+    "storage",
+    "encryption",
+    "governance",
+    "identity",
+    "compute",
+    "logging",
+    "validation",
+    "lifecycle"
+  ],
+  "properties": {
+    "api_version": {
+      "type": "string",
+      "description": "Version of the profile schema.",
+      "const": "v1"
+    },
+
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "description"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "dev",
+            "stage",
+            "live"
+          ]
+        },
+        "version": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environment",
+        "isolation"
+      ],
+      "properties": {
+        "environment": {
+          "type": "string",
+          "enum": [
+            "dev",
+            "stage",
+            "live"
+          ]
+        },
+        "isolation": {
+          "type": "string",
+          "enum": [
+            "dedicated"
+          ]
+        }
+      }
+    },
+
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strategy",
+        "architecture",
+        "public_access",
+        "private_connectivity",
+        "databricks_private_link",
+        "private_dns"
+      ],
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "custom",
+            "isolated"
+          ]
+        },
+        "architecture": {
+          "type": "string",
+          "enum": [
+            "client_managed",
+            "platform_managed"
+          ]
+        },
+        "public_access": {
+          "type": "boolean"
+        },
+        "private_connectivity": {
+          "type": "boolean"
+        },
+        "databricks_private_link": {
+          "type": "boolean"
+        },
+        "private_dns": {
+          "type": "string",
+          "enum": [
+            "standard",
+            "required"
+          ]
+        }
+      }
+    },
+
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace",
+        "application_data"
+      ],
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "enum": [
+            "platform_managed",
+            "dedicated"
+          ]
+        },
+        "application_data": {
+          "type": "string",
+          "enum": [
+            "governed"
+          ]
+        }
+      }
+    },
+
+    "encryption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace",
+        "application_data"
+      ],
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "enum": [
+            "platform_managed",
+            "customer_managed"
+          ]
+        },
+        "application_data": {
+          "type": "string",
+          "enum": [
+            "platform_managed",
+            "customer_managed"
+          ]
+        }
+      }
+    },
+
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unity_catalog",
+        "catalog_strategy",
+        "workspace_catalog_binding",
+        "external_locations"
+      ],
+      "properties": {
+        "unity_catalog": {
+          "type": "string",
+          "enum": [
+            "required"
+          ]
+        },
+        "catalog_strategy": {
+          "type": "string",
+          "enum": [
+            "application_onboarding",
+            "controlled"
+          ]
+        },
+        "workspace_catalog_binding": {
+          "type": "string",
+          "enum": [
+            "optional",
+            "recommended",
+            "required"
+          ]
+        },
+        "external_locations": {
+          "type": "string",
+          "enum": [
+            "controlled"
+          ]
+        }
+      }
+    },
+
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "access_model",
+        "service_principals",
+        "privileged_access"
+      ],
+      "properties": {
+        "access_model": {
+          "type": "string",
+          "enum": [
+            "enterprise_groups"
+          ]
+        },
+        "service_principals": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "required"
+          ]
+        },
+        "privileged_access": {
+          "type": "string",
+          "enum": [
+            "standard",
+            "controlled"
+          ]
+        }
+      }
+    },
+
+    "compute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy"
+      ],
+      "properties": {
+        "policy": {
+          "type": "string",
+          "enum": [
+            "development",
+            "stage",
+            "production"
+          ]
+        }
+      }
+    },
+
+    "logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "centralized"
+      ],
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "standard",
+            "enhanced"
+          ]
+        },
+        "centralized": {
+          "type": "boolean"
+        },
+        "audit": {
+          "type": "string",
+          "enum": [
+            "required"
+          ]
+        }
+      }
+    },
+
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "blocking",
+        "negative_tests",
+        "evidence"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "blocking": {
+          "type": "boolean"
+        },
+        "negative_tests": {
+          "type": "boolean"
+        },
+        "evidence": {
+          "type": "string",
+          "enum": [
+            "standard",
+            "required"
+          ]
+        }
+      }
+    },
+
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "flexible",
+            "controlled",
+            "strict"
+          ]
+        }
+      }
+    },
+
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
