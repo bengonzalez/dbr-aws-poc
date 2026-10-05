@@ -1,0 +1,49 @@
+api_version: v1
+
+network_policy:
+  name: standard-network-policy
+  version: "1.0"
+
+defaults:
+  public_access: false
+  private_connectivity: true
+
+strategies:
+
+  custom:
+    architecture: hybrid
+
+    resources:
+      vpc:
+        ownership: existing
+
+      subnets:
+        ownership: terraform
+
+      routing:
+        ownership: existing
+
+      security_groups:
+        ownership: terraform
+
+      endpoints:
+        ownership: existing
+
+  isolated:
+    architecture: platform_managed
+
+    resources:
+      vpc:
+        ownership: terraform
+
+      subnets:
+        ownership: terraform
+
+      routing:
+        ownership: terraform
+
+      security_groups:
+        ownership: terraform
+
+      endpoints:
+        ownership: terraform
