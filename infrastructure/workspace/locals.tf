@@ -18,5 +18,5 @@ locals {
     }
   )
 
-  resolved_network = var.network
+  network_requirements = var.network
 }

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "normalized-config.schema.json",
   "title": "Databricks Workspace Normalized Configuration",
-  "description": "Resolved configuration consumed by the Terraform workspace factory.",
+  "description": "Resolved configuration used by the Databricks workspace factory to provision a single workspace.",
   "type": "object",
   "additionalProperties": false,
 
@@ -17,21 +17,16 @@
       "additionalProperties": false,
       "properties": {
         "name": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{2,62}$"
         },
         "environment": {
           "type": "string",
-          "enum": [
-            "dev",
-            "stage",
-            "live"
-          ]
+          "enum": ["dev", "stage", "live"]
         },
         "isolation": {
           "type": "string",
-          "enum": [
-            "dedicated"
-          ]
+          "enum": ["dedicated"]
         }
       },
       "required": [
@@ -47,15 +42,15 @@
       "properties": {
         "provider": {
           "type": "string",
-          "enum": [
-            "aws"
-          ]
+          "enum": ["aws"]
         },
         "region": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "account": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^[0-9]{12}$"
         }
       },
       "required": [
@@ -70,10 +65,12 @@
       "additionalProperties": false,
       "properties": {
         "name": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "identifier": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,49}$"
         }
       },
       "required": [
@@ -87,10 +84,12 @@
       "additionalProperties": false,
       "properties": {
         "technical_owner": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "business_owner": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
@@ -102,54 +101,132 @@
     "network": {
       "type": "object",
       "additionalProperties": false,
+
       "properties": {
         "strategy": {
           "type": "string",
-          "enum": [
-            "custom",
-            "isolated"
-          ]
+          "enum": ["custom", "isolated"]
         },
+
         "architecture": {
           "type": "string",
           "enum": [
             "client_managed",
+            "hybrid",
             "platform_managed"
           ]
         },
-        "public_access": {
-          "type": "boolean"
-        },
-        "private_connectivity": {
-          "type": "boolean"
-        },
-        "vpc_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "private_subnet_ids": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "security_group_id": {
-          "type": [
-            "string",
-            "null"
+
+        "requirements": {
+          "type": "object",
+          "additionalProperties": false,
+
+          "properties": {
+            "vpc": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "ownership": {
+                  "type": "string",
+                  "enum": ["existing", "terraform"]
+                }
+              },
+              "required": [
+                "ownership"
+              ]
+            },
+
+            "subnets": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "ownership": {
+                  "type": "string",
+                  "enum": ["existing", "terraform"]
+                },
+
+                "private": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "cidr": {
+                        "type": "string"
+                      },
+                      "availability_zone": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "cidr",
+                      "availability_zone"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "ownership"
+              ]
+            },
+
+            "routing": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "ownership": {
+                  "type": "string",
+                  "enum": ["existing", "terraform"]
+                }
+              },
+              "required": [
+                "ownership"
+              ]
+            },
+
+            "security_groups": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "ownership": {
+                  "type": "string",
+                  "enum": ["existing", "terraform"]
+                }
+              },
+              "required": [
+                "ownership"
+              ]
+            },
+
+            "endpoints": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "ownership": {
+                  "type": "string",
+                  "enum": ["existing", "terraform"]
+                }
+              },
+              "required": [
+                "ownership"
+              ]
+            }
+          },
+
+          "required": [
+            "vpc",
+            "subnets",
+            "routing",
+            "security_groups",
+            "endpoints"
           ]
         }
       },
+
       "required": [
         "strategy",
         "architecture",
-        "public_access",
-        "private_connectivity",
-        "vpc_id",
-        "private_subnet_ids",
-        "security_group_id"
+        "requirements"
       ]
     },
 
@@ -158,7 +235,8 @@
       "additionalProperties": false,
       "properties": {
         "classification": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
@@ -171,10 +249,18 @@
       "additionalProperties": false,
       "properties": {
         "workspace": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "platform_managed",
+            "customer_managed"
+          ]
         },
         "application_data": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "platform_managed",
+            "customer_managed"
+          ]
         }
       },
       "required": [
@@ -191,7 +277,12 @@
           "type": "boolean"
         },
         "workspace_binding": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "required",
+            "recommended",
+            "optional"
+          ]
         }
       },
       "required": [
@@ -205,7 +296,8 @@
       "additionalProperties": false,
       "properties": {
         "policy": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
@@ -218,7 +310,8 @@
       "additionalProperties": false,
       "properties": {
         "level": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "centralized": {
           "type": "boolean"
@@ -248,7 +341,8 @@
           "type": "boolean"
         },
         "evidence": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [

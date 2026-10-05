@@ -28,9 +28,9 @@ output "resolved_private_subnet_ids" {
   value       = try(var.network.private_subnet_ids, [])
 }
 
-output "resolved_network" {
-  description = "Network configuration resolved for the workspace."
-  value       = local.resolved_network
+output "network_requirements" {
+  description = "Network requirements for the workspace."
+  value       = var.network
 }
 
 output "workspace_configuration" {
@@ -44,7 +44,7 @@ output "workspace_configuration" {
     }
     application = var.application
     ownership   = var.ownership
-    network     = local.resolved_network
+    network     = var.network
     data        = var.data
     encryption  = var.encryption
     governance  = var.governance

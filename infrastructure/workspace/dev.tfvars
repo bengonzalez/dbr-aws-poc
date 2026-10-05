@@ -23,36 +23,37 @@ network = {
   strategy     = "custom"
   architecture = "hybrid"
 
-  vpc = {
-    ownership = "existing"
-    id        = "vpc-xxxxxxxx"
-  }
+  requirements = {
+    vpc = {
+      ownership = "existing"
+    }
 
-  subnets = {
-    ownership = "terraform"
+    subnets = {
+      ownership = "terraform"
 
-    private = [
-      {
-        cidr              = "10.20.10.0/24"
-        availability_zone = "us-east-1a"
-      },
-      {
-        cidr              = "10.20.11.0/24"
-        availability_zone = "us-east-1b"
-      }
-    ]
-  }
+      private = [
+        {
+          cidr              = "10.20.10.0/24"
+          availability_zone = "us-east-1a"
+        },
+        {
+          cidr              = "10.20.11.0/24"
+          availability_zone = "us-east-1b"
+        }
+      ]
+    }
 
-  routing = {
-    ownership = "terraform"
-  }
+    routing = {
+      ownership = "existing"
+    }
 
-  security_groups = {
-    ownership = "terraform"
-  }
+    security_groups = {
+      ownership = "terraform"
+    }
 
-  endpoints = {
-    ownership = "terraform"
+    endpoints = {
+      ownership = "existing"
+    }
   }
 }
 

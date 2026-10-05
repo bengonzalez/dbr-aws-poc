@@ -61,38 +61,37 @@ variable "ownership" {
 
 
 variable "network" {
-  description = "Resolved network configuration for the workspace."
+  description = "Resolved network requirements for the workspace."
 
   type = object({
     strategy     = string
     architecture = string
 
-    vpc = object({
-      ownership = string
-      id        = optional(string)
-    })
+    requirements = object({
+      vpc = object({
+        ownership = string
+      })
 
-    subnets = object({
-      ownership = string
+      subnets = object({
+        ownership = string
 
-      private = optional(list(object({
-        cidr              = optional(string)
-        availability_zone = optional(string)
-        id                = optional(string)
-      })))
-    })
+        private = optional(list(object({
+          cidr              = string
+          availability_zone = string
+        })))
+      })
 
-    routing = object({
-      ownership = string
-    })
+      routing = object({
+        ownership = string
+      })
 
-    security_groups = object({
-      ownership = string
-      id        = optional(string)
-    })
+      security_groups = object({
+        ownership = string
+      })
 
-    endpoints = object({
-      ownership = string
+      endpoints = object({
+        ownership = string
+      })
     })
   })
 
@@ -117,7 +116,7 @@ variable "network" {
   validation {
     condition = contains(
       ["existing", "terraform"],
-      var.network.vpc.ownership
+      var.network.requirements.vpc.ownership
     )
 
     error_message = "VPC ownership must be existing or terraform."
@@ -126,7 +125,7 @@ variable "network" {
   validation {
     condition = contains(
       ["existing", "terraform"],
-      var.network.subnets.ownership
+      var.network.requirements.subnets.ownership
     )
 
     error_message = "Subnet ownership must be existing or terraform."
@@ -135,7 +134,7 @@ variable "network" {
   validation {
     condition = contains(
       ["existing", "terraform"],
-      var.network.routing.ownership
+      var.network.requirements.routing.ownership
     )
 
     error_message = "Routing ownership must be existing or terraform."
@@ -144,7 +143,7 @@ variable "network" {
   validation {
     condition = contains(
       ["existing", "terraform"],
-      var.network.security_groups.ownership
+      var.network.requirements.security_groups.ownership
     )
 
     error_message = "Security group ownership must be existing or terraform."
@@ -153,13 +152,12 @@ variable "network" {
   validation {
     condition = contains(
       ["existing", "terraform"],
-      var.network.endpoints.ownership
+      var.network.requirements.endpoints.ownership
     )
 
     error_message = "Endpoint ownership must be existing or terraform."
   }
 }
-
 
 variable "data" {
   description = "Resolved data classification."
