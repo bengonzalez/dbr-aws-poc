@@ -1,0 +1,39 @@
+api_version: v1
+
+data_policy:
+  name: standard-data-policy
+  version: "1.0"
+
+classifications:
+
+  public:
+    encryption:
+      workspace: platform_managed
+      application_data: platform_managed
+
+    governance:
+      unity_catalog: required
+
+  internal:
+    encryption:
+      workspace: platform_managed
+      application_data: platform_managed
+
+    governance:
+      unity_catalog: required
+
+  sensitive:
+    encryption:
+      workspace: platform_managed
+      application_data: platform_managed
+
+    governance:
+      unity_catalog: required
+
+  restricted:
+    encryption:
+      workspace: customer_managed
+      application_data: customer_managed
+
+    governance:
+      unity_catalog: required

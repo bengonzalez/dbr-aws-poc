@@ -1,0 +1,43 @@
+api_version: v1
+
+validation_policy:
+  name: standard-validation-policy
+  version: "1.0"
+
+defaults:
+  required: true
+  negative_tests: true
+
+profiles:
+
+  dev:
+    blocking: false
+    evidence: standard
+
+  stage:
+    blocking: true
+    evidence: standard
+
+  live:
+    blocking: true
+    evidence: required
+
+checks:
+
+  workspace:
+    exists: true
+
+  network:
+    required: true
+
+  identity:
+    required: true
+
+  encryption:
+    required: true
+
+  governance:
+    unity_catalog: true
+
+  logging:
+    centralized: true

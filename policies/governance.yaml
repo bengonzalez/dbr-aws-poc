@@ -1,0 +1,25 @@
+api_version: v1
+
+governance_policy:
+  name: standard-governance-policy
+  version: "1.0"
+
+unity_catalog:
+  required: true
+
+workspace_binding:
+  dev: optional
+  stage: recommended
+  live: required
+
+external_locations:
+  mode: controlled
+
+catalog_strategy:
+  dev: application_onboarding
+  stage: application_onboarding
+  live: controlled
+
+access_model:
+  groups: enterprise_groups
+  service_principals: supported
