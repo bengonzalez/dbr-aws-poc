@@ -27,3 +27,9 @@ override.tf.json
 
 # Ignore the .vscode directory, which is used to store project-specific settings for Visual Studio Code.
 .vscode/
+
+# Ignore the __pycache__ directory, which is used to store compiled Python files.
+__pycache__/
+
+# Ignore the normalized virtual environment directory, which is used to store virtual environments for Python projects.
+normalized/
