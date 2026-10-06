@@ -1,0 +1,31 @@
+api_version: v1
+
+request:
+  id: REQ-00124
+  submitted_by: application-team
+  source: workspace-request
+
+workspace:
+  name: document-ai-stage
+  environment: stage
+
+cloud:
+  provider: aws
+  region: us-east-1
+
+application:
+  name: Document AI
+  identifier: document-ai
+
+ownership:
+  technical_owner: document-ai-platform
+  business_owner: technology
+
+data:
+  classification: sensitive
+
+network:
+  strategy: custom
+
+tags:
+  cost_center: "12345"

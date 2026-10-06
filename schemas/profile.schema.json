@@ -279,10 +279,7 @@
           "type": "boolean"
         },
         "audit": {
-          "type": "string",
-          "enum": [
-            "required"
-          ]
+          "type": "boolean"
         }
       }
     },

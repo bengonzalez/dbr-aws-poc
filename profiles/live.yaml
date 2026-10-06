@@ -44,7 +44,7 @@ compute:
 logging:
   level: enhanced
   centralized: true
-  audit: required
+  audit: true
 
 validation:
   required: true
