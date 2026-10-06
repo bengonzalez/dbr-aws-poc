@@ -1,3 +1,76 @@
+def resolve_required_value(
+    attribute: str,
+    values: list[tuple[str, str]],
+) -> str:
+    """
+    Resolve a value that must be consistent across all sources.
+
+    Raises ValueError if multiple sources require different values.
+    """
+
+    unique_values = {value for _, value in values}
+
+    if len(unique_values) > 1:
+        details = "\n".join(
+            f"  - {source}: {value}"
+            for source, value in values
+        )
+
+        raise ValueError(
+            f"Conflicting requirements for '{attribute}':\n"
+            f"{details}"
+        )
+
+    return next(iter(unique_values))
+
+def validate_encryption_requirements(
+    profile_encryption: dict,
+    data_encryption_policy: dict,
+) -> None:
+    """
+    Validate that the encryption implementation selected by the
+    environment profile satisfies the requirements imposed by
+    the data classification policy.
+    """
+
+    if data_encryption_policy.get("required", False):
+
+        workspace_encryption = profile_encryption.get("workspace")
+        application_data_encryption = profile_encryption.get(
+            "application_data"
+        )
+
+        if not workspace_encryption:
+            raise ValueError(
+                "Encryption is required by the data policy, "
+                "but the profile does not define workspace encryption."
+            )
+
+        if not application_data_encryption:
+            raise ValueError(
+                "Encryption is required by the data policy, "
+                "but the profile does not define application data encryption."
+            )
+
+    if data_encryption_policy.get(
+        "customer_managed_required",
+        False,
+    ):
+
+        if profile_encryption.get("workspace") != "customer_managed":
+            raise ValueError(
+                "Customer-managed encryption is required by the "
+                "data policy for workspace encryption, but the "
+                "selected profile does not provide it."
+            )
+
+        if profile_encryption.get("application_data") != "customer_managed":
+            raise ValueError(
+                "Customer-managed encryption is required by the "
+                "data policy for application data encryption, but "
+                "the selected profile does not provide it."
+            )
+        
 def resolve_configuration(
     request: dict,
     profile: dict,
@@ -125,6 +198,17 @@ def resolve_configuration(
         )
 
     # ---------------------------------------------------------
+    # Validate encryption requirements
+    # ---------------------------------------------------------
+
+    data_encryption_policy = data_classification_config["encryption"]
+
+    validate_encryption_requirements(
+        profile_encryption=profile["encryption"],
+        data_encryption_policy=data_encryption_policy,
+    )
+
+    # ---------------------------------------------------------
     # Resolve validation
     # ---------------------------------------------------------
 
@@ -136,7 +220,7 @@ def resolve_configuration(
         raise ValueError(
             f"No validation policy exists for environment '{environment}'."
         )
-
+    
     # ---------------------------------------------------------
     # Build normalized configuration
     # ---------------------------------------------------------
@@ -202,7 +286,10 @@ def resolve_configuration(
             "classification": data_classification,
         },
 
-        "encryption": data_classification_config["encryption"],
+        "encryption": {
+            "workspace": profile["encryption"]["workspace"],
+            "application_data": profile["encryption"]["application_data"],
+        },
 
         "governance": {
             "unity_catalog": governance_uc_required,

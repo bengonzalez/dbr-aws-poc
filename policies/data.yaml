@@ -8,32 +8,29 @@ classifications:
 
   public:
     encryption:
-      workspace: platform_managed
-      application_data: platform_managed
+      required: true
 
     governance:
       unity_catalog: required
 
   internal:
     encryption:
-      workspace: platform_managed
-      application_data: platform_managed
+      required: true
 
     governance:
       unity_catalog: required
 
   sensitive:
     encryption:
-      workspace: platform_managed
-      application_data: platform_managed
+      required: true
 
     governance:
       unity_catalog: required
 
   restricted:
     encryption:
-      workspace: customer_managed
-      application_data: customer_managed
+      required: true
+      customer_managed_required: true
 
     governance:
       unity_catalog: required
