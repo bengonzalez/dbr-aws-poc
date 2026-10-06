@@ -142,7 +142,39 @@
               "properties": {
                 "ownership": {
                   "type": "string",
-                  "enum": ["existing", "terraform"]
+                  "enum": ["existing", "terraform"],
+                  "allocation": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "source": {
+                        "type": "string",
+                        "enum": ["platform"]
+                      },
+                      "count": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "availability_zones": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "minItems": 1
+                      },
+                      "cidr_source": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "source",
+                      "count",
+                      "availability_zones",
+                      "cidr_source"
+                    ]
+                  }
                 },
 
                 "private": {

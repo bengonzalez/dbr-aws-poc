@@ -6,6 +6,7 @@ def resolve_configuration(
     data_policy: dict,
     governance_policy: dict,
     validation_policy: dict,
+    inventory: dict,
     account_id: str,
 ) -> dict:
 
@@ -27,6 +28,70 @@ def resolve_configuration(
         )
 
     network_resources = network_strategy_config["resources"]
+
+    # ---------------------------------------------------------
+    # Resolve platform network inventory
+    # ---------------------------------------------------------
+
+    aws_inventory = inventory["aws"]
+
+    account_inventory = None
+
+    for account_name, account in aws_inventory["accounts"].items():
+        if account["account_id"] == account_id:
+            account_inventory = account
+            break
+
+    if account_inventory is None:
+        raise ValueError(
+            f"AWS account '{account_id}' is not defined "
+            f"in the platform inventory."
+        )
+
+    region = request["cloud"]["region"]
+
+    region_inventory = account_inventory["regions"].get(region)
+
+    if region_inventory is None:
+        raise ValueError(
+            f"AWS region '{region}' is not defined for "
+            f"account '{account_id}' in the platform inventory."
+        )
+
+    if not region_inventory["approved"]:
+        raise ValueError(
+            f"AWS region '{region}' is not approved for "
+            f"account '{account_id}'."
+        )
+
+    network_inventory = region_inventory["networks"].get("primary")
+
+    if network_inventory is None:
+        raise ValueError(
+            f"No primary network is defined for "
+            f"account '{account_id}' and region '{region}'."
+        )
+
+    subnet_inventory = network_inventory["subnets"]["private"]
+
+    subnet_allocation = subnet_inventory.get("allocation")
+
+    if subnet_inventory["ownership"] == "terraform":
+
+        if subnet_allocation is None:
+            raise ValueError(
+                "Terraform-owned private subnets require "
+                "an allocation definition."
+            )
+
+        if (
+            subnet_allocation["count"]
+            != len(subnet_allocation["availability_zones"])
+        ):
+            raise ValueError(
+                "Private subnet allocation count does not match "
+                "the number of availability zones."
+            )
 
     # ---------------------------------------------------------
     # Resolve data classification
@@ -98,7 +163,39 @@ def resolve_configuration(
         "network": {
             "strategy": network_strategy,
             "architecture": network_strategy_config["architecture"],
-            "requirements": network_resources,
+
+            "requirements": {
+                "vpc": {
+                    "ownership": network_resources["vpc"]["ownership"],
+                },
+
+                "subnets": {
+                    "ownership": network_resources["subnets"]["ownership"],
+
+                    "allocation": {
+                        "source": "platform",
+                        "count": subnet_allocation["count"],
+                        "availability_zones": (
+                            subnet_allocation["availability_zones"]
+                        ),
+                        "cidr_source": subnet_allocation["cidr_source"],
+                    },
+                },
+
+                "routing": {
+                    "ownership": network_resources["routing"]["ownership"],
+                },
+
+                "security_groups": {
+                    "ownership": (
+                        network_resources["security_groups"]["ownership"]
+                    ),
+                },
+
+                "endpoints": {
+                    "ownership": network_resources["endpoints"]["ownership"],
+                },
+            },
         },
 
         "data": {

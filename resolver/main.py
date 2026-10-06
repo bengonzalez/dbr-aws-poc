@@ -41,6 +41,7 @@ def main():
     data_policy_path = ROOT / "policies" / "data.yaml"
     governance_policy_path = ROOT / "policies" / "governance.yaml"
     validation_policy_path = ROOT / "policies" / "validation.yaml"
+    inventory_path = ROOT / "platform" / "inventory" / "aws.yaml"
 
     profile = load_yaml(profile_path)
     network_policy = load_yaml(network_policy_path)
@@ -48,7 +49,8 @@ def main():
     data_policy = load_yaml(data_policy_path)
     governance_policy = load_yaml(governance_policy_path)
     validation_policy = load_yaml(validation_policy_path)
-
+    inventory = load_yaml(inventory_path)
+    
     normalized = resolve_configuration(
         request=request,
         profile=profile,
@@ -57,6 +59,7 @@ def main():
         data_policy=data_policy,
         governance_policy=governance_policy,
         validation_policy=validation_policy,
+        inventory=inventory,
         account_id=args.account,
     )
 

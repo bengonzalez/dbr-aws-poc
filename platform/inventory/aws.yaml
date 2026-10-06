@@ -21,10 +21,10 @@ aws:
 
             primary:
               name: databricks-dev
+
               vpc:
                 ownership: existing
                 id: vpc-PLACEHOLDER
-
                 cidr: 10.20.0.0/16
 
               subnets:
