@@ -4,7 +4,7 @@ import yaml
 
 from loader import load_yaml
 from resolver import resolve_configuration
-
+from validator import validate_document
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -31,6 +31,15 @@ def main():
     request_path = ROOT / args.request
 
     request = load_yaml(request_path)
+
+    request_schema_path = ROOT / "schemas" / "workspace-request.schema.json"
+
+    validate_document(
+        document=request,
+        schema_path=request_schema_path,
+        document_name="Workspace request",
+    )
+    print("Workspace request validation: PASS")
 
     environment = request["workspace"]["environment"]
 
@@ -63,6 +72,18 @@ def main():
         account_id=args.account,
     )
 
+    normalized_schema_path = (
+        ROOT / "schemas" / "normalized-config.schema.json"
+    )
+
+    validate_document(
+        document=normalized,
+        schema_path=normalized_schema_path,
+        document_name="Normalized configuration",
+    )
+
+    print("Normalized configuration validation: PASS")
+
     output_directory = ROOT / "normalized"
     output_directory.mkdir(exist_ok=True)
 
@@ -84,4 +105,17 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ValueError as error:
+        print()
+        print("Workspace Factory Validation")
+        print("----------------------------")
+        print()
+        print("STATUS: FAILED")
+        print()
+        print(error)
+        print()
+        print("No provisioning was performed.")
+
+        raise SystemExit(1)
