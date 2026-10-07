@@ -13,7 +13,7 @@ workspace:
     allowed: false
 
   encryption:
-    mode: platform_managed
+    required: true
 
 identity:
   access_model: enterprise_groups

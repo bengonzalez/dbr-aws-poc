@@ -25,13 +25,43 @@ def resolve_required_value(
 
 def validate_encryption_requirements(
     profile_encryption: dict,
+    security_policy: dict,
     data_encryption_policy: dict,
 ) -> None:
     """
     Validate that the encryption implementation selected by the
     environment profile satisfies the requirements imposed by
-    the data classification policy.
+    both the security policy and the data classification policy.
     """
+
+    # ---------------------------------------------------------
+    # Security policy requirements
+    # ---------------------------------------------------------
+
+    security_encryption = security_policy["workspace"]["encryption"]
+
+    if security_encryption.get("required", False):
+
+        workspace_encryption = profile_encryption.get("workspace")
+        application_data_encryption = profile_encryption.get(
+            "application_data"
+        )
+
+        if not workspace_encryption:
+            raise ValueError(
+                "Encryption is required by the security policy, "
+                "but the profile does not define workspace encryption."
+            )
+
+        if not application_data_encryption:
+            raise ValueError(
+                "Encryption is required by the security policy, "
+                "but the profile does not define application data encryption."
+            )
+
+    # ---------------------------------------------------------
+    # Data classification requirements
+    # ---------------------------------------------------------
 
     if data_encryption_policy.get("required", False):
 
@@ -52,6 +82,10 @@ def validate_encryption_requirements(
                 "but the profile does not define application data encryption."
             )
 
+    # ---------------------------------------------------------
+    # Stronger data classification requirement
+    # ---------------------------------------------------------
+
     if data_encryption_policy.get(
         "customer_managed_required",
         False,
@@ -70,7 +104,7 @@ def validate_encryption_requirements(
                 "data policy for application data encryption, but "
                 "the selected profile does not provide it."
             )
-        
+
 def resolve_configuration(
     request: dict,
     profile: dict,
@@ -205,6 +239,7 @@ def resolve_configuration(
 
     validate_encryption_requirements(
         profile_encryption=profile["encryption"],
+        security_policy=security_policy,
         data_encryption_policy=data_encryption_policy,
     )
 
