@@ -31,5 +31,8 @@ override.tf.json
 # Ignore the __pycache__ directory, which is used to store compiled Python files.
 __pycache__/
 
-# Ignore the normalized virtual environment directory, which is used to store virtual environments for Python projects.
-normalized/
+# Operator-local Databricks CLI profile name. This differs per person/machine
+# and should never be committed. Terraform auto-loads this file alongside
+# whatever -var-file is passed for a given workspace. Copy
+# local.auto.tfvars.example to get started.
+infrastructure/workspace/local.auto.tfvars

@@ -1,0 +1,57 @@
+api_version: v1
+workspace:
+  name: document-ai-dev
+  environment: dev
+  isolation: dedicated
+cloud:
+  provider: aws
+  region: us-east-1
+  account: '556940913059'
+application:
+  name: Document AI
+  identifier: document-ai
+ownership:
+  technical_owner: document-ai-platform
+  business_owner: technology
+network:
+  strategy: custom
+  architecture: hybrid
+  requirements:
+    vpc:
+      ownership: existing
+    subnets:
+      ownership: terraform
+      allocation:
+        source: platform
+        count: 2
+        availability_zones:
+        - us-east-1a
+        - us-east-1b
+        cidr_source: platform
+    routing:
+      ownership: existing
+    security_groups:
+      ownership: terraform
+    endpoints:
+      ownership: existing
+data:
+  classification: sensitive
+encryption:
+  workspace: platform_managed
+  application_data: platform_managed
+governance:
+  unity_catalog: true
+  workspace_binding: optional
+compute:
+  policy: development
+logging:
+  level: standard
+  centralized: true
+  audit: false
+validation:
+  required: true
+  blocking: false
+  negative_tests: true
+  evidence: standard
+tags:
+  cost_center: '12345'

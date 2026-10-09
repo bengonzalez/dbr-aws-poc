@@ -1,0 +1,49 @@
+# Deployment-only values for the "document-ai-dev" workspace: the handful of
+# concrete inputs Terraform needs that resolver/main.py does not (and should
+# not) resolve on its own — existing resource ids and concrete subnet CIDRs.
+# Everything else comes from normalized/document-ai-dev.yaml.
+#
+# This file is committed (it's infrastructure configuration, not a secret).
+# The Databricks CLI profile used to run Terraform is NOT here — see
+# local.auto.tfvars.example.
+
+api_version: v1
+
+databricks:
+  account_id: "331f8702-2e00-42e9-82e2-2935e7e1d4f9"
+
+# Only needed because network.requirements.vpc/routing.ownership resolve to
+# "existing" for this workspace (custom strategy).
+platform:
+  vpc_id: vpc-60c2a81d
+  route_table_ids:
+    - rtb-042726c440509ac14
+    - rtb-0e29c295cc93c131c
+
+# Always needed: Terraform always creates the private subnets themselves,
+# regardless of VPC ownership.
+network:
+  subnets:
+    private:
+      - cidr: 172.31.100.0/24
+        availability_zone: us-east-1a
+      - cidr: 172.31.101.0/24
+        availability_zone: us-east-1b
+
+# Optional per-resource ownership overrides (uncomment to deviate from the
+# network.strategy preset for one specific resource):
+# overrides:
+#   vpc_ownership: terraform
+#   vpc_cidr: 10.60.0.0/16
+#   routing_ownership: terraform
+#   security_group_ownership: terraform
+#   endpoints_ownership: terraform
+#   existing_security_group_id: sg-xxxxxxxx
+
+# Optional bring-your-own KMS keys (only meaningful when encryption is
+# customer_managed; omit to let the platform create dedicated keys):
+# kms:
+#   existing_workspace_storage_key_arn: arn:aws:kms:...
+#   existing_workspace_storage_key_alias: alias/...
+#   existing_managed_services_key_arn: arn:aws:kms:...
+#   existing_managed_services_key_alias: alias/...
