@@ -9,14 +9,24 @@ resource "aws_s3_bucket" "workspace_root" {
   })
 }
 
-# Use AWS-managed S3 encryption for this POC.
+# Encryption follows the resolved profile: customer-managed KMS when required
+# (e.g. live), AWS-managed SSE-S3 otherwise (e.g. dev/stage).
 resource "aws_s3_bucket_server_side_encryption_configuration" "workspace_root" {
   bucket = aws_s3_bucket.workspace_root.id
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm = (
+        var.encryption.workspace == "customer_managed" ? "aws:kms" : "AES256"
+      )
+
+      kms_master_key_id = (
+        var.encryption.workspace == "customer_managed" ?
+        module.workspace_kms[0].workspace_storage_key_arn : null
+      )
     }
+
+    bucket_key_enabled = var.encryption.workspace == "customer_managed" ? true : null
   }
 }
 

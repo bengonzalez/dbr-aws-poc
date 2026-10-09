@@ -61,12 +61,94 @@ variable "application" {
 }
 
 variable "platform" {
-  description = "Existing platform infrastructure resolved for the workspace."
+  description = "Existing platform infrastructure resolved for the workspace, when network ownership is 'existing'."
 
   type = object({
-    vpc_id          = string
-    route_table_ids = list(string)
+    vpc_id          = optional(string)
+    route_table_ids = optional(list(string))
   })
+
+  default = {}
+}
+
+variable "vpc_ownership_override" {
+  description = "Override the VPC ownership implied by network.strategy ('existing' or 'terraform'). Null defers to the strategy default: custom -> existing, isolated -> terraform."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.vpc_ownership_override == null || contains(["existing", "terraform"], var.vpc_ownership_override)
+    error_message = "vpc_ownership_override must be 'existing', 'terraform', or null."
+  }
+}
+
+variable "routing_ownership_override" {
+  description = "Override the routing ownership implied by network.strategy. Null defers to the strategy default: custom -> existing, isolated -> terraform."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.routing_ownership_override == null || contains(["existing", "terraform"], var.routing_ownership_override)
+    error_message = "routing_ownership_override must be 'existing', 'terraform', or null."
+  }
+}
+
+variable "security_group_ownership_override" {
+  description = "Override the security group ownership (default: terraform-created in every strategy)."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.security_group_ownership_override == null || contains(["existing", "terraform"], var.security_group_ownership_override)
+    error_message = "security_group_ownership_override must be 'existing', 'terraform', or null."
+  }
+}
+
+variable "endpoints_ownership_override" {
+  description = "Override the VPC endpoints ownership implied by network.strategy. Null defers to the strategy default: custom -> existing, isolated -> terraform."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.endpoints_ownership_override == null || contains(["existing", "terraform"], var.endpoints_ownership_override)
+    error_message = "endpoints_ownership_override must be 'existing', 'terraform', or null."
+  }
+}
+
+variable "vpc_cidr" {
+  description = "CIDR block for a new VPC. Required only when VPC ownership resolves to 'terraform'."
+  type        = string
+  default     = null
+}
+
+variable "existing_security_group_id" {
+  description = "ID of an existing security group to use, when security group ownership resolves to 'existing'."
+  type        = string
+  default     = null
+}
+
+variable "existing_workspace_storage_key_arn" {
+  description = "ARN of an existing KMS key to use for workspace storage instead of creating a dedicated one."
+  type        = string
+  default     = null
+}
+
+variable "existing_workspace_storage_key_alias" {
+  description = "Alias name of the existing workspace storage key, if any."
+  type        = string
+  default     = null
+}
+
+variable "existing_managed_services_key_arn" {
+  description = "ARN of an existing KMS key to use for managed services instead of creating a dedicated one."
+  type        = string
+  default     = null
+}
+
+variable "existing_managed_services_key_alias" {
+  description = "Alias name of the existing managed services key, if any."
+  type        = string
+  default     = null
 }
 
 

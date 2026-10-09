@@ -4,6 +4,16 @@ output "databricks_network_id" {
   value = databricks_mws_networks.workspace.network_id
 }
 
+output "databricks_workspace_id" {
+  description = "Databricks workspace ID."
+  value       = databricks_mws_workspaces.this.workspace_id
+}
+
+output "databricks_workspace_url" {
+  description = "URL of the provisioned Databricks workspace."
+  value       = databricks_mws_workspaces.this.workspace_url
+}
+
 output "workspace_name" {
   description = "Requested workspace name."
   value       = var.workspace.name
@@ -68,6 +78,22 @@ output "workspace_cross_account_role_name" {
 output "workspace_cross_account_role_arn" {
   description = "Workspace-specific Databricks cross-account IAM role ARN."
   value       = module.workspace_iam_role.role_arn
+}
+
+output "workspace_storage_kms_key_arn" {
+  description = "ARN of the customer-managed KMS key for workspace storage, when encryption.workspace is customer_managed; null otherwise."
+  value = (
+    var.encryption.workspace == "customer_managed" ?
+    module.workspace_kms[0].workspace_storage_key_arn : null
+  )
+}
+
+output "managed_services_kms_key_arn" {
+  description = "ARN of the customer-managed KMS key for Databricks managed services, when encryption.workspace is customer_managed; null otherwise."
+  value = (
+    var.encryption.workspace == "customer_managed" ?
+    module.workspace_kms[0].managed_services_key_arn : null
+  )
 }
 
 output "workspace_configuration" {

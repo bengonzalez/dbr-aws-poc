@@ -3,9 +3,21 @@ variable "workspace_name" {
   type        = string
 }
 
-variable "vpc_id" {
-  description = "Existing VPC ID."
+variable "existing_vpc_id" {
+  description = "ID of an existing VPC to use. Null creates a new VPC using vpc_cidr."
   type        = string
+  default     = null
+}
+
+variable "vpc_cidr" {
+  description = "CIDR block for a new VPC. Required when existing_vpc_id is null."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.existing_vpc_id != null || var.vpc_cidr != null
+    error_message = "vpc_cidr is required when existing_vpc_id is not set."
+  }
 }
 
 variable "private_subnets" {
@@ -22,23 +34,25 @@ variable "private_subnets" {
   }
 }
 
-variable "route_table_ids" {
-  description = "Existing route tables to associate with the workspace subnets."
-
-  type = list(string)
-
-  validation {
-    condition     = length(var.route_table_ids) >= 2
-    error_message = "At least two route tables are required."
-  }
+variable "existing_route_table_ids" {
+  description = "IDs of existing route tables to associate with the workspace subnets. Null creates new route tables (local route only, no NAT/IGW)."
+  type        = list(string)
+  default     = null
 
   validation {
     condition = (
-      length(var.route_table_ids) == length(var.private_subnets)
+      var.existing_route_table_ids == null ||
+      length(var.existing_route_table_ids) == length(var.private_subnets)
     )
 
-    error_message = "The number of route tables must match the number of private subnets."
+    error_message = "When provided, the number of existing route tables must match the number of private subnets."
   }
+}
+
+variable "existing_security_group_id" {
+  description = "ID of an existing security group to use for the workspace. Null creates a new one."
+  type        = string
+  default     = null
 }
 
 variable "tags" {
