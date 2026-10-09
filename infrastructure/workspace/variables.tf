@@ -1,3 +1,14 @@
+variable "databricks_account_id" {
+  description = "Databricks account ID used to configure the workspace network."
+  type        = string
+  sensitive   = true
+}
+
+variable "databricks_profile" {
+  description = "Databricks CLI authentication profile used for account-level Terraform operations."
+  type        = string
+}
+
 variable "workspace" {
   description = "Resolved workspace configuration."
 
@@ -46,6 +57,15 @@ variable "application" {
   type = object({
     name       = string
     identifier = string
+  })
+}
+
+variable "platform" {
+  description = "Existing platform infrastructure resolved for the workspace."
+
+  type = object({
+    vpc_id          = string
+    route_table_ids = list(string)
   })
 }
 

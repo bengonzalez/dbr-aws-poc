@@ -1,3 +1,9 @@
+output "databricks_network_id" {
+  description = "Databricks MWS network configuration ID."
+
+  value = databricks_mws_networks.workspace.network_id
+}
+
 output "workspace_name" {
   description = "Requested workspace name."
   value       = var.workspace.name
@@ -19,13 +25,33 @@ output "network_strategy" {
 }
 
 output "resolved_vpc_id" {
-  description = "Resolved VPC ID."
-  value       = try(var.network.vpc_id, null)
+  description = "VPC used by the workspace."
+
+  value = module.workspace_network.vpc_id
 }
 
 output "resolved_private_subnet_ids" {
-  description = "Resolved private subnet IDs."
-  value       = try(var.network.private_subnet_ids, [])
+  description = "Private subnet IDs created for the workspace."
+
+  value = module.workspace_network.private_subnet_ids
+}
+
+output "workspace_security_group_id" {
+  description = "Security group created for the workspace."
+
+  value = module.workspace_network.security_group_id
+}
+
+output "platform_vpc_id" {
+  description = "Existing platform VPC used by the workspace."
+
+  value = var.platform.vpc_id
+}
+
+output "platform_route_table_ids" {
+  description = "Existing route tables used by the workspace."
+
+  value = var.platform.route_table_ids
 }
 
 output "network_requirements" {

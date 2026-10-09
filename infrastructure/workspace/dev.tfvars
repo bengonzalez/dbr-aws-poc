@@ -1,3 +1,6 @@
+databricks_account_id = "331f8702-2e00-42e9-82e2-2935e7e1d4f9"
+databricks_profile = "bxg3611 Premium"
+
 workspace = {
   name        = "document-ai-dev"
   environment = "dev"
@@ -33,11 +36,11 @@ network = {
 
       private = [
         {
-          cidr              = "10.20.10.0/24"
+          cidr              = "172.31.100.0/24"
           availability_zone = "us-east-1a"
         },
         {
-          cidr              = "10.20.11.0/24"
+          cidr              = "172.31.101.0/24"
           availability_zone = "us-east-1b"
         }
       ]
@@ -90,4 +93,13 @@ validation = {
 
 tags = {
   cost_center = "12345"
+}
+
+platform = {
+  vpc_id = "vpc-60c2a81d"
+
+  route_table_ids = [
+    "rtb-042726c440509ac14",
+    "rtb-0e29c295cc93c131c"
+  ]
 }
