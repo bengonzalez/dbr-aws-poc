@@ -67,6 +67,18 @@ resource "terraform_data" "workspace_configuration" {
 }
 
 
+
+resource "databricks_mws_credentials" "workspace" {
+  provider = databricks.mws
+
+  credentials_name = "${local.workspace_name}-credentials"
+  role_arn         = module.workspace_iam_role.role_arn
+
+  depends_on = [
+    module.workspace_iam_role
+  ]
+}
+
 module "workspace_iam_role" {
   source = "../../modules/workspace-iam-role"
 
