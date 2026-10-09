@@ -65,3 +65,21 @@ resource "terraform_data" "workspace_configuration" {
     security_group_id = module.workspace_network.security_group_id
   }
 }
+
+
+module "workspace_iam_role" {
+  source = "../../modules/workspace-iam-role"
+
+  providers = {
+    databricks.mws = databricks.mws
+  }
+
+  workspace_name               = local.workspace_name
+  databricks_account_id        = var.databricks_account_id
+  aws_account_id               = data.aws_caller_identity.current.account_id
+  aws_region                   = var.cloud.region
+  vpc_id                       = module.workspace_network.vpc_id
+  databricks_security_group_id = module.workspace_network.security_group_id
+
+  tags = local.common_tags
+}

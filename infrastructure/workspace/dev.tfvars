@@ -1,5 +1,5 @@
 databricks_account_id = "331f8702-2e00-42e9-82e2-2935e7e1d4f9"
-databricks_profile = "bxg3611 Premium"
+databricks_profile    = "bxg3611 Premium"
 
 workspace = {
   name        = "document-ai-dev"

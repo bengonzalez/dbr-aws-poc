@@ -59,6 +59,17 @@ output "network_requirements" {
   value       = var.network
 }
 
+
+output "workspace_cross_account_role_name" {
+  description = "Workspace-specific Databricks cross-account IAM role name."
+  value       = module.workspace_iam_role.role_name
+}
+
+output "workspace_cross_account_role_arn" {
+  description = "Workspace-specific Databricks cross-account IAM role ARN."
+  value       = module.workspace_iam_role.role_arn
+}
+
 output "workspace_configuration" {
   description = "Resolved workspace configuration used by the factory."
   value = {

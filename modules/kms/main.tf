@@ -3,18 +3,18 @@ data "aws_caller_identity" "current" {}
 data "aws_iam_policy_document" "databricks_storage_cmk" {
   version = "2012-10-17"
 
-statement {
-  sid    = "EnableIAMUserPermissions"
-  effect = "Allow"
+  statement {
+    sid    = "EnableIAMUserPermissions"
+    effect = "Allow"
 
-  principals {
-    type        = "AWS"
-    identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+
+    actions   = ["kms:*"]
+    resources = ["*"]
   }
-
-  actions   = ["kms:*"]
-  resources = ["*"]
-}
 
   statement {
     sid    = "AllowDatabricksToUseKMSKeyForDBFS"

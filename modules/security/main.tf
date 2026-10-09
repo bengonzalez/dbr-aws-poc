@@ -110,12 +110,12 @@ data "aws_iam_policy_document" "databricks_workspace_assume_role" {
   statement {
     effect = "Allow"
 
-  principals {
-    type = "AWS"
-    identifiers = [
-      "arn:aws:iam::414351767826:root"
-    ]
-  }
+    principals {
+      type = "AWS"
+      identifiers = [
+        "arn:aws:iam::414351767826:root"
+      ]
+    }
 
     actions = [
       "sts:AssumeRole"
@@ -164,7 +164,7 @@ data "databricks_aws_unity_catalog_policy" "data_access" {
   aws_account_id = data.aws_caller_identity.current.account_id
   bucket_name    = split(":", var.data_bucket_arn)[5]
   role_name      = "${var.project_name}-data-access-role"
-  kms_name      = var.kms_key_arn
+  kms_name       = var.kms_key_arn
 }
 
 resource "aws_iam_policy" "databricks_data_access" {
