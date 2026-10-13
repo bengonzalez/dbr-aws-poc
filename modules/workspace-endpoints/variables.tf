@@ -8,8 +8,8 @@ variable "vpc_id" {
   type        = string
 }
 
-variable "vpc_cidr" {
-  description = "CIDR block of the VPC, used to scope interface endpoint ingress."
+variable "workspace_security_group_id" {
+  description = "The workspace's compute security group, used as the ingress source for the interface endpoint security group."
   type        = string
 }
 

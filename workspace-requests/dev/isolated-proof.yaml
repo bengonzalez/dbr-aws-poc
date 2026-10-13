@@ -1,0 +1,31 @@
+api_version: v1
+
+request:
+  id: REQ-00126
+  submitted_by: platform-team
+  source: workspace-request
+
+workspace:
+  name: isolated-proof
+  environment: dev
+
+cloud:
+  provider: aws
+  region: us-east-1
+
+application:
+  name: Isolated Proof
+  identifier: isolated-proof
+
+ownership:
+  technical_owner: platform-team
+  business_owner: technology
+
+data:
+  classification: sensitive
+
+network:
+  strategy: isolated
+
+tags:
+  cost_center: platform-test

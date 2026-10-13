@@ -1,0 +1,31 @@
+api_version: v1
+
+request:
+  id: REQ-00127
+  submitted_by: platform-team
+  source: workspace-request
+
+workspace:
+  name: client-vpc-proof
+  environment: dev
+
+cloud:
+  provider: aws
+  region: us-east-1
+
+application:
+  name: Client VPC Proof
+  identifier: client-vpc-proof
+
+ownership:
+  technical_owner: platform-team
+  business_owner: technology
+
+data:
+  classification: sensitive
+
+network:
+  strategy: custom
+
+tags:
+  cost_center: platform-test

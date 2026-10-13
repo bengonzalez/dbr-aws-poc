@@ -73,13 +73,13 @@ resource "aws_security_group" "interface_endpoints" {
 resource "aws_vpc_security_group_ingress_rule" "interface_endpoints_https" {
   security_group_id = aws_security_group.interface_endpoints.id
 
-  description = "Allow HTTPS access to interface endpoints from the VPC"
+  description = "Allow HTTPS access to interface endpoints from the workspace compute security group"
 
   ip_protocol = "tcp"
   from_port   = 443
   to_port     = 443
 
-  cidr_ipv4 = var.vpc_cidr
+  referenced_security_group_id = var.workspace_security_group_id
 }
 
 resource "aws_vpc_endpoint" "sts" {

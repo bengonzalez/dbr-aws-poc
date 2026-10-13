@@ -42,9 +42,9 @@ def build_tfvars(normalized: dict, deployment: dict) -> dict:
         "Deployment file is missing 'databricks.account_id'.",
     )
 
-    private_subnets = (
-        deployment.get("network", {}).get("subnets", {}).get("private")
-    )
+    deployment_network = deployment.get("network", {})
+
+    private_subnets = deployment_network.get("subnets", {}).get("private")
 
     require(
         isinstance(private_subnets, list) and len(private_subnets) >= 2,
@@ -52,6 +52,12 @@ def build_tfvars(normalized: dict, deployment: dict) -> dict:
         "'network.subnets.private' (each with 'cidr' and "
         "'availability_zone').",
     )
+
+    # Required whenever VPC ownership resolves to 'terraform' - whether by
+    # the 'isolated' strategy's own default or by an explicit override. Not
+    # nested under 'overrides': it isn't an override, it's always needed
+    # once Terraform is the one creating the VPC.
+    vpc_cidr = deployment_network.get("vpc_cidr")
 
     network = dict(normalized["network"])
     requirements = dict(network["requirements"])
@@ -89,15 +95,20 @@ def build_tfvars(normalized: dict, deployment: dict) -> dict:
     if platform:
         tfvars["platform"] = platform
 
+    if vpc_cidr is not None:
+        tfvars["vpc_cidr"] = vpc_cidr
+
     overrides = deployment.get("overrides", {})
 
     for key in OVERRIDE_OWNERSHIP_KEYS:
         if key in overrides:
             tfvars[f"{key}_override"] = overrides[key]
 
-    for key in ("vpc_cidr", "existing_security_group_id"):
-        if key in overrides:
-            tfvars[key] = overrides[key]
+    if "existing_security_group_id" in overrides:
+        tfvars["existing_security_group_id"] = overrides["existing_security_group_id"]
+
+    if "privatelink_enabled" in overrides:
+        tfvars["privatelink_enabled_override"] = overrides["privatelink_enabled"]
 
     kms = deployment.get("kms", {})
 
@@ -124,7 +135,10 @@ def main() -> None:
         help=(
             "Workspace name. By default, looks for "
             "normalized/<workspace>.yaml and "
-            "infrastructure/workspace/<workspace>.deployment.yaml."
+            "infrastructure/workspace/<workspace>/deployment.yaml (the "
+            "per-workspace directory convention). Pass --deployment/--output "
+            "explicitly for workspaces still on the legacy flat layout "
+            "(e.g. document-ai-dev)."
         ),
     )
 
@@ -150,14 +164,16 @@ def main() -> None:
         else ROOT / "normalized" / f"{args.workspace}.yaml"
     )
 
+    workspace_dir = ROOT / "infrastructure" / "workspace" / args.workspace
+
     deployment_path = (
         Path(args.deployment) if args.deployment
-        else ROOT / "infrastructure" / "workspace" / f"{args.workspace}.deployment.yaml"
+        else workspace_dir / "deployment.yaml"
     )
 
     output_path = (
         Path(args.output) if args.output
-        else ROOT / "infrastructure" / "workspace" / f"{args.workspace}.tfvars.json"
+        else workspace_dir / "terraform.tfvars.json"
     )
 
     normalized = load_yaml(normalized_path)
