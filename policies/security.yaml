@@ -1,28 +1,15 @@
 api_version: v1
 
+# Only the fields resolver.py actually reads live here - see
+# CLAUDE.md Sec5.13 (2026-10-14). `defaults:`, `workspace.public_access`,
+# `identity.*`, and `iam.*` were removed because nothing consumed them.
+# The IAM role shape they described is already real - see
+# modules/workspace-iam-role - it's just not driven by this file.
+
 security_policy:
   name: standard-security-policy
   version: "1.0"
 
-defaults:
-  public_access: false
-  encryption_required: true
-
 workspace:
-  public_access:
-    allowed: false
-
   encryption:
-    required: true
-
-identity:
-  access_model: enterprise_groups
-  service_principals: supported
-  privileged_access: standard
-
-iam:
-  workspace_role:
-    required: true
-
-  data_access_role:
     required: true

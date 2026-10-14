@@ -1,5 +1,11 @@
 api_version: v1
 
+# Only the fields resolver.py actually reads live here - see
+# CLAUDE.md Sec5.13 (2026-10-14). `external_locations.mode`,
+# `catalog_strategy.*`, and `access_model.*` were removed because nothing
+# consumed them - they belong with the Unity Catalog modules (CLAUDE.md
+# Sec8 milestone 3, not started) once those actually exist.
+
 governance_policy:
   name: standard-governance-policy
   version: "1.0"
@@ -11,15 +17,3 @@ workspace_binding:
   dev: optional
   stage: recommended
   live: required
-
-external_locations:
-  mode: controlled
-
-catalog_strategy:
-  dev: application_onboarding
-  stage: application_onboarding
-  live: controlled
-
-access_model:
-  groups: enterprise_groups
-  service_principals: supported

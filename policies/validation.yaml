@@ -1,5 +1,11 @@
 api_version: v1
 
+# Only the fields resolver.py actually reads live here - see
+# CLAUDE.md Sec5.13 (2026-10-14). The `checks:` block was removed -
+# nothing executes those checks yet (CLAUDE.md Sec5.8, no validation
+# harness exists). Re-add it once that harness is built and actually
+# reads it.
+
 validation_policy:
   name: standard-validation-policy
   version: "1.0"
@@ -21,23 +27,3 @@ profiles:
   live:
     blocking: true
     evidence: required
-
-checks:
-
-  workspace:
-    exists: true
-
-  network:
-    required: true
-
-  identity:
-    required: true
-
-  encryption:
-    required: true
-
-  governance:
-    unity_catalog: true
-
-  logging:
-    centralized: true

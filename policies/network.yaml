@@ -1,12 +1,14 @@
 api_version: v1
 
+# Only the fields resolver.py actually reads live here - see
+# CLAUDE.md Sec5.13 (2026-10-14). The `defaults:` block (public_access,
+# private_connectivity) was removed because resolver.py never reads it -
+# those values are enforced in Terraform itself (no public Databricks
+# access, no NAT by default), not derived from this policy file.
+
 network_policy:
   name: standard-network-policy
   version: "1.0"
-
-defaults:
-  public_access: false
-  private_connectivity: true
 
 strategies:
 

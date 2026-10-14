@@ -1,6 +1,12 @@
-$schema: ../schemas/profile.schema.json
-
 api_version: v1
+
+# Only the fields resolver.py actually reads live here - see
+# CLAUDE.md Sec5.13 (2026-10-14). Aspirational fields that used to live in
+# this file (network.*, storage.*, governance.*, identity.*, validation.*,
+# lifecycle.*, approval.*) were removed because nothing consumed them; the
+# design intent they captured is already written up in CLAUDE.md Sec6's
+# decision baseline table. Add a field back here only once resolver.py or
+# a Terraform module actually reads it.
 
 profile:
   name: live
@@ -8,35 +14,11 @@ profile:
   description: Production Databricks workspace
 
 workspace:
-  environment: live
   isolation: dedicated
-
-network:
-  strategy: custom
-  architecture: client_managed
-  public_access: false
-  private_connectivity: true
-  databricks_private_link: true
-  private_dns: required
-
-storage:
-  workspace: dedicated
-  application_data: governed
 
 encryption:
   workspace: customer_managed
   application_data: customer_managed
-
-governance:
-  unity_catalog: required
-  catalog_strategy: controlled
-  workspace_catalog_binding: required
-  external_locations: controlled
-
-identity:
-  access_model: enterprise_groups
-  service_principals: required
-  privileged_access: controlled
 
 compute:
   policy: production
@@ -45,15 +27,3 @@ logging:
   level: enhanced
   centralized: true
   audit: true
-
-validation:
-  required: true
-  blocking: true
-  negative_tests: true
-  evidence: required
-
-lifecycle:
-  mode: strict
-
-approval:
-  required: true

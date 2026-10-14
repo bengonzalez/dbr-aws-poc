@@ -116,8 +116,8 @@ requirements, security controls, Terraform behavior.
 | `workspace-requests/{dev,stage,live}/` | Working | Minimal requester input YAML. One `document-ai` request per env exists as the test case. |
 | `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `generate_tfvars.py` turns that + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/<env>/<name>/` (§8 milestone 13). `generate_backend_config.py` turns `normalized/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (**new**, §8 milestone 14) scans every committed `deployment.yaml` for CIDR collisions/pool violations; called automatically by `generate_tfvars.py` before it writes tfvars. See §5 gaps. |
 | `schemas/` | Working, has a gap | `workspace-request.schema.json`, `normalized-config.schema.json` actively used. `profile.schema.json` exists but is **never actually validated against** — see §5. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. |
-| `profiles/{dev,stage,live}.yaml` | Working, inconsistent | Per-environment defaults. `dev.yaml` is missing a `network.architecture` key that `stage.yaml`/`live.yaml` both have — not currently caught because profile.schema.json validation isn't wired in. |
-| `policies/{network,security,data,governance,validation}.yaml` | Working | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping, validation blocking per env). |
+| `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely (the resolver takes network strategy from the request, not the profile — see §5.13 item 3, still open). |
+| `policies/{network,security,data,governance,validation}.yaml` | Working, trimmed | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping, validation blocking per env). Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads — see that milestone for exactly what was removed from each file and why. |
 | `platform/inventory/aws.yaml` | Working, partially stale | Declares the `dev` account's primary network; `vpc.id`/`vpc.cidr` were fixed to the real values 2026-10-13 (§8 milestone 14). The actual VPC id used by Terraform still comes from `infrastructure/deployments/<env>/<name>/deployment.yaml`, not this file — the resolver never reads `vpc.id`/`vpc.cidr` from here, only the subnet `allocation` strategy. Also now declares `cidr_pools.isolated_vpc_pool` (§8 milestone 14), the reserved range for Terraform-created VPCs, checked by `resolver/check_cidr_allocations.py`. Whether the resolver should start emitting a `platform` block itself remains open (§5.3). |
 | `normalized/*.yaml` | Working — **was silently gitignored, now fixed** | Resolver output per workspace request. `CLAUDE.md` previously (incorrectly) stated these were committed; `.gitignore` actually had a stale `normalized/` rule (its own comment called it "the normalized **virtual environment** directory," which doesn't match what's in there) that had been silently excluding every file in this directory from version control. Removed 2026-10-09 — these now will be tracked going forward. |
 | `infrastructure/workspace/*.tf` | **One shared root for every workspace** (§8 milestone 12 — supersedes the per-directory approach from milestone 10) | `providers.tf`/`versions.tf` (the latter has a partial `backend "s3" {}` block — bucket/key/region supplied at `init` time, since Terraform backend blocks can't contain variables), `variables.tf`, `main.tf` (a single `module "deployment"` call into `modules/workspace-deployment`), `outputs.tf` (forwards). No per-workspace copies of any of this — every workspace uses these exact same files; only the `-var-file` and the backend-config differ per workspace. |
@@ -221,21 +221,20 @@ is to set `endpoints_ownership_override = "terraform"` for dev specifically
 1. **Profile schema is never validated.** `resolver/main.py` validates the
    workspace request and the normalized output, but never calls
    `validate_document()` against `schemas/profile.schema.json` for the loaded
-   profile. This is how `profiles/dev.yaml`'s missing `network.architecture`
-   key has gone unnoticed.
-2. **`profile.schema.json`'s `network.architecture` enum is incomplete, and the
-   field is dead.** It only allows `client_managed` / `platform_managed`, but
-   `policies/network.yaml`'s `custom` strategy resolves to architecture
-   `hybrid` (and `normalized-config.schema.json` correctly allows `hybrid`).
-   `resolver.py` never reads `profile["network"]["architecture"]` at all — it
-   recomputes architecture itself from `policies/network.yaml`. So
-   `stage.yaml`/`live.yaml`'s declared `architecture: client_managed` is
-   inert and already disagrees with what the resolver actually produces
-   (`hybrid`). **Decision (2026-10-09): explicitly deferred, not fixed this
-   pass** — noted here as a known cleanup item (remove the field from the
-   profile schema/files, since the resolver is the real source of truth for
-   architecture) rather than acted on, to keep the networking/KMS rework
-   (§8) bounded.
+   profile. Still true as of 2026-10-14 — tracked as item 2 of §5.13.
+   `schemas/profile.schema.json` now additionally describes a much larger
+   shape than the trimmed profiles actually have (§8 milestone 15), so
+   resolving this item means either rewriting the schema to match the
+   smaller shape and wiring it in, or deleting the schema outright.
+2. **`profile["network"]["architecture"]` was a dead field — fixed by
+   deletion.** It only allowed `client_managed`/`platform_managed`, while
+   `policies/network.yaml`'s `custom` strategy actually resolves to
+   `hybrid` — `resolver.py` never read this field at all; it recomputes
+   architecture itself from `policies/network.yaml`. **Resolved
+   2026-10-14** (§8 milestone 15) by removing `network.*` from every
+   profile entirely, rather than trying to fix the enum — the resolver is
+   the real source of truth for architecture, so the profile never needed
+   its own copy.
 3. **`platform/inventory/aws.yaml` VPC id is a stale placeholder** (`vpc-PLACEHOLDER`)
    even though the real VPC (`vpc-60c2a81d`) has been known since the POC. The
    resolver reads this file for subnet-allocation validation but the normalized
@@ -345,26 +344,21 @@ is to set `endpoints_ownership_override = "terraform"` for dev specifically
     fails loudly on overlap before tfvars are generated. Picking the
     value is still manual — this is a check, not an allocator — but
     collisions are no longer silent.
-13. **Config-layer complexity review (2026-10-13) — remaining items not
-    yet started.** Triggered by the CIDR-collision gap above: the user
-    asked for a full review of `workspace-requests/`, `profiles/`,
-    `policies/`, and `platform/inventory/` to judge whether the
-    request → profile → policy → resolver design has gotten too complex.
-    Finding: the layering itself is reasonable, but there's a real gap
-    between what's *declared* in profiles/policies and what `resolver.py`
-    actually *reads* — most profile/policy fields are decorative today
-    (see the finding written up in conversation; not duplicated here to
-    avoid drift from the live code). Four follow-up items were identified
-    and explicitly deferred (user's call: tackle CIDR first, revisit these
-    one at a time afterward) — **not started**:
-    - Trim `profiles/*.yaml` and `policies/*.yaml` down to only the
-      fields `resolver.py` actually reads; move or delete the rest
-      (`storage.*`, `governance.*`, `identity.*`, `validation.*`,
-      `lifecycle.*`, `approval.*` in profiles; `validation.yaml`'s
-      `checks:` block; `data.yaml`'s per-classification
-      `governance.unity_catalog` duplicate; `security.yaml`'s `identity.*`
-      /`iam.*`/`workspace.public_access`) — all currently unread by any
-      code path.
+13. **Config-layer complexity review (2026-10-13) — three items remain.**
+    Triggered by the CIDR-collision gap above: the user asked for a full
+    review of `workspace-requests/`, `profiles/`, `policies/`, and
+    `platform/inventory/` to judge whether the request → profile →
+    policy → resolver design has gotten too complex. Finding: the
+    layering itself is reasonable, but there's a real gap between what's
+    *declared* in profiles/policies and what `resolver.py` actually
+    *reads* — most profile/policy fields were decorative (see the finding
+    written up in conversation; not duplicated here to avoid drift from
+    the live code). Four follow-up items were identified and explicitly
+    deferred (user's call: tackle CIDR first, revisit these one at a time
+    afterward):
+    - ~~Trim `profiles/*.yaml` and `policies/*.yaml` down to only the
+      fields `resolver.py` actually reads~~ — **done, see §8 milestone
+      15.**
     - Resolve `profile.schema.json` (§5.1): either wire it into
       `main.py` for real validation (against a shrunk profile shape, once
       the item above lands) or delete it — 346 lines of schema that
@@ -950,6 +944,60 @@ Priority order agreed on:
       output (confirmed the new `platform.vpc_cidr` field doesn't leak
       through) and identical `terraform plan` resource counts (16, 23,
       22) as every prior verification.
+15. **Trimmed `profiles/*.yaml` and `policies/*.yaml` to only the fields
+    `resolver.py` reads — closes item 1 of §5.13** (2026-10-14). Traced
+    every dict access `resolver.py` makes against `profile`,
+    `network_policy`, `security_policy`, `data_policy`,
+    `governance_policy`, and `validation_policy` first, confirmed the
+    change was purely subtractive (no field being removed is read
+    anywhere), then removed:
+    - From every profile (`dev`/`stage`/`live`): `workspace.environment`
+      (redundant with the filename, read nowhere), all of `network.*`
+      (the resolver takes network strategy from the **request**, never
+      the profile — this also surfaces item 3 of §5.13, still open),
+      `storage.*`, `governance.*`, `identity.*`, `validation.*`,
+      `lifecycle.*`, and (on `live`) `approval.*`. Also dropped the
+      `$schema: ../schemas/profile.schema.json` hint from `stage`/`live`
+      (`dev` never had it) — re-add once item 2 of §5.13
+      (`profile.schema.json`) is actually resolved, since right now it
+      would point at a schema describing the *old*, much larger shape.
+    - `policies/network.yaml`: the `defaults:` block (`public_access`,
+      `private_connectivity`) — never read; those behaviors are enforced
+      directly in Terraform, not derived from this file.
+    - `policies/security.yaml`: `defaults:`, `workspace.public_access`,
+      `identity.*`, `iam.*` — never read. Only `workspace.encryption.
+      required` survives (the one field `resolve_configuration()` checks).
+    - `policies/data.yaml`: each classification's `governance:` sub-block
+      — duplicated `governance.yaml`'s global `unity_catalog.required`
+      and was never read here.
+    - `policies/governance.yaml`: `external_locations.mode`,
+      `catalog_strategy.*`, `access_model.*` — never read; belongs with
+      the Unity Catalog modules (milestone 3) once those exist.
+    - `policies/validation.yaml`: the entire `checks:` block — nothing
+      executes those checks yet (§5.8, no validation harness exists).
+    - None of this touched `resolver.py`, any schema, or any
+      `workspace-requests/*.yaml` — confirmed by re-running
+      `resolver/main.py` for all five existing requests
+      (`document-ai-dev`, `isolated-proof`, `client-vpc-proof`,
+      `document-ai-stage`, `document-ai-live`) and diffing the resulting
+      `normalized/*.yaml` against what was already committed: **byte-
+      identical** in every case. Also regenerated `terraform.tfvars.json`
+      for all three real workspaces (byte-identical) and re-ran
+      `terraform plan` for all three (same 16/23/22 resource counts as
+      every prior check) — confirms this was pure dead-config removal
+      with zero behavior change anywhere in the pipeline.
+    - What's *not* lost: the design intent these fields captured (per-env
+      network/storage/governance/identity/validation/lifecycle posture)
+      is already written up in prose in §6's decision baseline table —
+      trimming the YAML didn't delete any documented decision, just the
+      YAML that looked like it was enforcing one but wasn't.
+    - Remaining items from §5.13, to tackle one at a time per the user's
+      explicit instruction: item 2 (resolve `profile.schema.json` — now
+      even more out of sync with the shrunk profile shape than before),
+      item 3 (`network.strategy` authority — request vs. profile, flagged
+      again above since trimming profiles made the dead field's removal
+      even more clearly correct), item 4 (merge the five `policies/*.yaml`
+      files into one).
 
 ## 9. Conventions observed (keep consistent)
 
