@@ -29,7 +29,7 @@ def require(condition: bool, message: str) -> None:
         raise ValueError(message)
 
 
-def build_tfvars(normalized: dict, deployment: dict) -> dict:
+def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
     """
     Combine a resolver normalized config with the small set of
     deployment-only values Terraform needs but the resolver does not
@@ -123,6 +123,43 @@ def build_tfvars(normalized: dict, deployment: dict) -> dict:
         if key in kms:
             tfvars[key] = kms[key]
 
+    if normalized["governance"]["unity_catalog"]:
+        region = normalized["cloud"]["region"]
+
+        # Known existing metastores (one per Databricks account/region) live
+        # in platform/inventory/aws.yaml's 'databricks' section, keyed by
+        # Databricks account id - looked up automatically so a workspace's
+        # deployment.yaml only needs to name its Databricks account, not
+        # repeat the metastore id every time. 'unity_catalog.
+        # existing_metastore_id' in deployment.yaml is an optional override
+        # for the rare workspace that needs a different metastore.
+        inventory_metastore_id = (
+            inventory.get("databricks", {})
+            .get("accounts", {})
+            .get(databricks_account_id, {})
+            .get("regions", {})
+            .get(region, {})
+            .get("metastore_id")
+        )
+
+        override_metastore_id = deployment.get("unity_catalog", {}).get(
+            "existing_metastore_id"
+        )
+
+        existing_metastore_id = override_metastore_id or inventory_metastore_id
+
+        require(
+            bool(existing_metastore_id),
+            f"governance.unity_catalog is true, but no metastore is known "
+            f"for Databricks account '{databricks_account_id}' region "
+            f"'{region}'. Add it to platform/inventory/aws.yaml's "
+            f"'databricks.accounts' section, or set "
+            f"'unity_catalog.existing_metastore_id' explicitly in this "
+            f"workspace's deployment file to override.",
+        )
+
+        tfvars["existing_metastore_id"] = existing_metastore_id
+
     return tfvars
 
 
@@ -192,12 +229,13 @@ def main() -> None:
     )
 
     deployment = load_yaml(deployment_path)
+    inventory = load_yaml(ROOT / "platform" / "inventory" / "aws.yaml")
 
     # Check this (and every other committed workspace's) CIDR allocations
     # for collisions before generating anything Terraform would act on.
     check_cidr_allocations()
 
-    tfvars = build_tfvars(normalized, deployment)
+    tfvars = build_tfvars(normalized, deployment, inventory)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -87,3 +87,13 @@ output "workspace_configuration" {
   description = "Resolved workspace configuration used by the factory."
   value       = module.deployment.workspace_configuration
 }
+
+output "unity_catalog_name" {
+  description = "Name of the Unity Catalog catalog created for this workspace, when governance.unity_catalog is true; null otherwise."
+  value       = module.deployment.unity_catalog_name
+}
+
+output "unity_catalog_external_location_name" {
+  description = "Name of the Unity Catalog external location backing this workspace's catalog, when governance.unity_catalog is true; null otherwise."
+  value       = module.deployment.unity_catalog_external_location_name
+}

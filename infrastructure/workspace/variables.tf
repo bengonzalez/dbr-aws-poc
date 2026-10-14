@@ -157,6 +157,12 @@ variable "existing_managed_services_key_alias" {
   default     = null
 }
 
+variable "existing_metastore_id" {
+  description = "ID of the existing, platform-owned Unity Catalog metastore to assign this workspace to. Required whenever governance.unity_catalog is true - not created by this factory (CLAUDE.md Sec6)."
+  type        = string
+  default     = null
+}
+
 
 variable "ownership" {
   description = "Workspace ownership information."

@@ -43,3 +43,10 @@ overrides:
   # accounts tried. Generic S3/STS endpoints still get built; NAT is a
   # possible future fallback for full connectivity - see CLAUDE.md TODO.
   privatelink_enabled: false
+
+# The metastore for this workspace's Databricks account (eddbb85f.../TSA)
+# is looked up automatically from platform/inventory/aws.yaml's
+# 'databricks.accounts' section - nothing needed here unless this
+# workspace needs to override that default:
+# unity_catalog:
+#   existing_metastore_id: "..."

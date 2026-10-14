@@ -54,3 +54,10 @@ network:
 #   existing_workspace_storage_key_alias: alias/...
 #   existing_managed_services_key_arn: arn:aws:kms:...
 #   existing_managed_services_key_alias: alias/...
+
+# The metastore for this workspace's Databricks account (331f8702...) is
+# looked up automatically from platform/inventory/aws.yaml's
+# 'databricks.accounts' section - nothing needed here unless this
+# workspace needs to override that default:
+# unity_catalog:
+#   existing_metastore_id: "..."

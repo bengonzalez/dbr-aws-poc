@@ -33,4 +33,5 @@ module "deployment" {
   existing_workspace_storage_key_alias = var.existing_workspace_storage_key_alias
   existing_managed_services_key_arn    = var.existing_managed_services_key_arn
   existing_managed_services_key_alias  = var.existing_managed_services_key_alias
+  existing_metastore_id                = var.existing_metastore_id
 }

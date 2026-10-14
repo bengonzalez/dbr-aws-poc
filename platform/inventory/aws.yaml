@@ -21,6 +21,31 @@ platform:
 cidr_pools:
   isolated_vpc_pool: 10.64.0.0/10   # 10.64.0.0 - 10.127.255.255
 
+# Known existing Unity Catalog metastores, keyed by Databricks account id
+# (not AWS account id - a metastore belongs to a Databricks account/region,
+# which is independent of which AWS account hosts the workspace; multiple
+# Databricks accounts can and do share one AWS account in this project's
+# test setup). Not created by this factory (CLAUDE.md §6) - each of these
+# was auto-provisioned by Databricks and found via
+# `databricks account metastores list --profile <profile>`.
+#
+# resolver/generate_tfvars.py looks this up automatically using
+# deployment.yaml's databricks.account_id + the resolved cloud.region -
+# a workspace only needs its own deployment.yaml entry
+# (unity_catalog.existing_metastore_id) to override this default, not to
+# supply it every time. See CLAUDE.md §5.3/§8 milestone 20.
+databricks:
+  accounts:
+    "331f8702-2e00-42e9-82e2-2935e7e1d4f9":
+      regions:
+        us-east-1:
+          metastore_id: "1361f3a1-e668-4807-89ee-1936b7a877fb"
+
+    "eddbb85f-6b3c-4261-8ca2-0d9d62575ce2":
+      regions:
+        us-east-1:
+          metastore_id: "0745ece3-cb83-4a7f-9dc5-dc1716c015c7"
+
 aws:
 
   accounts:

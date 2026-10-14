@@ -201,3 +201,51 @@ resource "databricks_mws_workspaces" "this" {
     databricks_mws_networks.workspace,
   ]
 }
+
+# ---------------------------------------------------------------------------
+# Unity Catalog. Gated on governance.unity_catalog (always true today, but
+# kept gated in case that policy ever changes - same style as the
+# customer_managed encryption branches above). Must come after
+# databricks_mws_workspaces.this: the storage credential, catalog, and
+# external location below are all managed through the account-level
+# provider via a provider_config { workspace_id } block, which needs the
+# real, created workspace ID.
+# ---------------------------------------------------------------------------
+
+module "unity_catalog_data" {
+  count  = var.governance.unity_catalog ? 1 : 0
+  source = "../unity-catalog-data"
+
+  providers = {
+    databricks.mws = databricks.mws
+  }
+
+  workspace_name          = local.workspace_name
+  databricks_account_id   = var.databricks_account_id
+  databricks_workspace_id = databricks_mws_workspaces.this.workspace_id
+  aws_account_id          = data.aws_caller_identity.current.account_id
+  aws_region              = var.cloud.region
+
+  encryption_customer_managed = var.encryption.application_data == "customer_managed"
+
+  tags = local.common_tags
+}
+
+module "unity_catalog_workspace" {
+  count  = var.governance.unity_catalog ? 1 : 0
+  source = "../unity-catalog-workspace"
+
+  providers = {
+    databricks.mws = databricks.mws
+  }
+
+  workspace_name          = local.workspace_name
+  databricks_account_id   = var.databricks_account_id
+  databricks_workspace_id = databricks_mws_workspaces.this.workspace_id
+  existing_metastore_id   = var.existing_metastore_id
+  uc_bucket_name          = module.unity_catalog_data[0].bucket_name
+
+  depends_on = [
+    module.unity_catalog_data
+  ]
+}

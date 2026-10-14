@@ -96,6 +96,22 @@ output "managed_services_kms_key_arn" {
   )
 }
 
+output "unity_catalog_name" {
+  description = "Name of the Unity Catalog catalog created for this workspace, when governance.unity_catalog is true; null otherwise."
+  value = (
+    var.governance.unity_catalog ?
+    module.unity_catalog_workspace[0].catalog_name : null
+  )
+}
+
+output "unity_catalog_external_location_name" {
+  description = "Name of the Unity Catalog external location backing this workspace's catalog, when governance.unity_catalog is true; null otherwise."
+  value = (
+    var.governance.unity_catalog ?
+    module.unity_catalog_data[0].external_location_name : null
+  )
+}
+
 output "workspace_configuration" {
   description = "Resolved workspace configuration used by the factory."
   value = {
