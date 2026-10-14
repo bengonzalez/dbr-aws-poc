@@ -24,3 +24,9 @@ variable "uc_bucket_name" {
   description = "Name of the S3 bucket (from modules/unity-catalog-data) backing this workspace's catalog storage root."
   type        = string
 }
+
+variable "catalog_admin_principal" {
+  description = "A Databricks user name, group name, or service principal application ID to grant ALL_PRIVILEGES on this workspace's catalog. Null skips granting entirely - the catalog owner then defaults to whoever runs terraform apply, same as today. No identity/access model exists elsewhere in this pipeline (CLAUDE.md Sec6), so this is deliberately optional and deployment-only, not resolved automatically."
+  type        = string
+  default     = null
+}

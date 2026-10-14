@@ -27,6 +27,9 @@ data:
 network:
   strategy: custom
 
+governance:
+  catalog_admin_principal: "bxg3611@hotmail.com"
+
 tags:
   cost_center: "12345"
 

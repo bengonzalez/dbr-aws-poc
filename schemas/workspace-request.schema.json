@@ -176,6 +176,19 @@
       "additionalProperties": {
         "type": "string"
       }
+    },
+
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+
+      "properties": {
+        "catalog_admin_principal": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A Databricks user name, group name, or service principal application ID to grant ALL_PRIVILEGES on this workspace's Unity Catalog catalog. Optional - omit to leave the catalog ungranted (owner defaults to whoever runs terraform apply)."
+        }
+      }
     }
   },
 

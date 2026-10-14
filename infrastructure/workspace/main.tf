@@ -34,4 +34,5 @@ module "deployment" {
   existing_managed_services_key_arn    = var.existing_managed_services_key_arn
   existing_managed_services_key_alias  = var.existing_managed_services_key_alias
   existing_metastore_id                = var.existing_metastore_id
+  catalog_admin_principal              = var.catalog_admin_principal
 }

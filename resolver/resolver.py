@@ -273,7 +273,26 @@ def resolve_configuration(
         raise ValueError(
             f"No validation policy exists for environment '{environment}'."
         )
-    
+
+    # ---------------------------------------------------------
+    # Resolve governance requester input - a pure passthrough, not
+    # resolved from any policy/profile (unlike unity_catalog/
+    # workspace_binding above). Optional: a request naming no
+    # catalog_admin_principal just leaves the catalog ungranted.
+    # ---------------------------------------------------------
+
+    governance = {
+        "unity_catalog": governance_uc_required,
+        "workspace_binding": workspace_binding,
+    }
+
+    catalog_admin_principal = request.get("governance", {}).get(
+        "catalog_admin_principal"
+    )
+
+    if catalog_admin_principal is not None:
+        governance["catalog_admin_principal"] = catalog_admin_principal
+
     # ---------------------------------------------------------
     # Build normalized configuration
     # ---------------------------------------------------------
@@ -344,10 +363,7 @@ def resolve_configuration(
             "application_data": profile["encryption"]["application_data"],
         },
 
-        "governance": {
-            "unity_catalog": governance_uc_required,
-            "workspace_binding": workspace_binding,
-        },
+        "governance": governance,
 
         "compute": {
             "policy": profile["compute"]["policy"],

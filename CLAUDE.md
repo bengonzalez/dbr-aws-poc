@@ -115,7 +115,7 @@ requirements, security controls, Terraform behavior.
 |---|---|---|
 | `workspace-requests/{dev,stage,live}/` | Working | Minimal requester input YAML. One `document-ai` request per env exists as the test case. |
 | `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `generate_tfvars.py` turns that + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/<env>/<name>/` (§8 milestone 13). `generate_backend_config.py` turns `normalized/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (**new**, §8 milestone 14) scans every committed `deployment.yaml` for CIDR collisions/pool violations; called automatically by `generate_tfvars.py` before it writes tfvars. See §5 gaps. |
-| `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. |
+| `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. `workspace-request.schema.json` gained an optional `governance.catalog_admin_principal` (§8 milestone 22) — the first requester-controlled `governance` field; every other `governance.*` value is policy/profile-derived. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. |
 | `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely — `policies/network.yaml`'s `allowed_strategies` is now the only thing with an opinion on network strategy per environment (§8 milestone 16). |
 | `policies/policies.yaml` | Working | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping + per-environment `allowed_strategies`, validation blocking per env), one key per domain (`network_policy`, `security_policy`, `data_policy`, `governance_policy`, `validation_policy`). Trimmed to only the fields `resolver.py` actually reads (§8 milestone 15), gained `network_policy.allowed_strategies` (§8 milestone 16), then merged from five separate files into this one 2026-10-14 (§8 milestone 18 — closes §5.13's config-layer complexity review). |
 | `platform/inventory/aws.yaml` | Working, partially stale | Declares the `dev` account's primary network; `vpc.id`/`vpc.cidr` were fixed to the real values 2026-10-13 (§8 milestone 14). The actual VPC id used by Terraform still comes from `infrastructure/deployments/<env>/<name>/deployment.yaml`, not this file — the resolver never reads `vpc.id`/`vpc.cidr` from here, only the subnet `allocation` strategy (this half of §5.3 is still open). Also declares `cidr_pools.isolated_vpc_pool` (§8 milestone 14) and, as of 2026-10-14, a `databricks.accounts.<id>.regions.<region>.metastore_id` section (§8 milestone 20) — the latter **is** actually auto-consumed, by `generate_tfvars.py` (not the resolver), closing this gap's metastore-id slice while the VPC-id slice remains open. |
@@ -375,15 +375,16 @@ is to set `endpoints_ownership_override = "terraform"` for dev specifically
       config-layer complexity review entirely.**
 14. **Unity Catalog follow-ups explicitly scoped out of milestone 19, not
     forgotten.** Four things were deliberately left undone when the
-    Unity Catalog modules were built (§8 milestone 19):
-    - `databricks_grants` — no identity/principal mapping flows through
-      this pipeline today (CLAUDE.md §6 already lists "access model" and
-      "exceptions" as deliberately undefined platform-wide), so catalog
-      ownership defaults to whoever runs `terraform apply`. Revisit once
-      an identity/principal model exists.
-    - `databricks_default_namespace_setting` — a UX nicety (so SQL users
-      don't need `USE CATALOG x`), not core to "every workspace gets a
-      working, isolated catalog." Easy, low-risk follow-up any time.
+    Unity Catalog modules were built (§8 milestone 19). Two are now done
+    (§8 milestone 21):
+    - ~~`databricks_grants`~~ — **done, see §8 milestone 21.** Still no
+      identity/principal model flows through this pipeline automatically
+      (CLAUDE.md §6 still lists "access model"/"exceptions" as
+      deliberately undefined platform-wide) — granting is opt-in and
+      deployment-only (`unity_catalog.catalog_admin_principal`), not
+      auto-derived from `ownership.technical_owner` or anything else.
+    - ~~`databricks_default_namespace_setting`~~ — **done, see §8
+      milestone 21.**
     - `governance.workspace_binding`'s per-environment values
       (`dev`=optional, `stage`=recommended, `live`=required) are resolved
       into every `normalized/*.yaml` but **not** consumed — every
@@ -1292,6 +1293,100 @@ Priority order agreed on:
       counts (26/33/32) and no errors, confirming this was a pure
       ergonomics improvement with no functional change to what gets
       built.
+21. **Default namespace setting + optional catalog grants — closes two of
+    §5.14's four Unity Catalog follow-ups** (2026-10-14). Both added to
+    `modules/unity-catalog-workspace/main.tf`, after `databricks_catalog.this`:
+    - `databricks_default_namespace_setting` — unconditional (every
+      UC-enabled workspace gets one), `namespace.value =
+      databricks_catalog.this.name`, same `provider_config { workspace_id }`
+      pattern as every other UC resource in this milestone.
+    - `databricks_grants` — gated on a new optional
+      `catalog_admin_principal` variable (string, nullable, threaded
+      through `modules/workspace-deployment` → `infrastructure/workspace`
+      exactly like `existing_metastore_id`). When set, grants that one
+      principal (a Databricks user name, group name, or service
+      principal application id — the operator's responsibility to supply
+      a real one) `ALL_PRIVILEGES` on the catalog. When unset (the
+      default, and the case for all three real workspaces today), no
+      grants resource is created at all — catalog ownership defaults to
+      whoever runs `terraform apply`, unchanged from before this existed.
+      Deliberately **not** auto-derived from `ownership.technical_owner`
+      or any other already-resolved field — those are free-text strings
+      with no guarantee of matching a real Databricks identity, and
+      CLAUDE.md §6 already lists the platform's actual access/identity
+      model as undefined. Originally surfaced in `deployment.yaml` under
+      the same `unity_catalog:` section as the metastore override — **this
+      placement was wrong and corrected one milestone later (§8 milestone
+      22)**: the requester, not the operator, is the one who knows who
+      should administer their own catalog.
+    - `governance.workspace_binding` differentiation remains the one
+      open item from §5.14 — no concrete need for cross-workspace catalog
+      access has come up, so it stays speculative rather than built.
+    - Verified: `terraform fmt`/`validate` clean. Regenerated tfvars for
+      all three real workspaces with no `catalog_admin_principal` set —
+      `terraform plan` resource counts each grew by exactly 1 (27/34/33,
+      the new default-namespace-setting resource) with no grants
+      resource present, confirming the opt-in gating works. Temporarily
+      set `catalog_admin_principal` on `document-ai-dev`'s
+      `deployment.yaml`, confirmed `databricks_grants` appears in the
+      plan (28 resources), then reverted the file and regenerated tfvars
+      back to the original, zero-diff state.
+22. **Moved `catalog_admin_principal` from `deployment.yaml` to the
+    requester-facing request — corrects milestone 21's placement**
+    (2026-10-14, one turn later). The user noticed the gap directly:
+    "I don't see where the user can specify this... ideally this would
+    be in the workspace-requests yaml file." They were right, and this
+    is a different category of value than `vpc_id`/`metastore_id`:
+    those need an operator to look something up in AWS/Databricks (this
+    factory's whole reason for existing is to keep that lookup off the
+    requester) — `catalog_admin_principal` is a plain passthrough
+    string, same shape as `ownership.technical_owner`/`business_owner`,
+    which already live in the request. There was never a reason to make
+    the operator relay it through `deployment.yaml` on the requester's
+    behalf.
+    - New optional `governance.catalog_admin_principal` in
+      `schemas/workspace-request.schema.json` (not in the `required`
+      list — a request naming nothing here leaves the catalog ungranted,
+      same default as before). This is the **first** requester-controlled
+      field under `governance` — every other `governance.*` value is
+      entirely policy/profile-derived.
+    - `resolver/resolver.py`: `governance` is now assembled as its own
+      local variable before being placed into the normalized dict (was
+      an inline literal), with `catalog_admin_principal` copied straight
+      from `request.get("governance", {})` when present - a pure
+      passthrough, not resolved against any policy, which is why this
+      stays architecturally fine for `resolver.py` to touch even though
+      it stays deliberately blind to every *infrastructure* id.
+      `schemas/normalized-config.schema.json`'s `governance` object
+      gained the same optional field (not required).
+    - `resolver/generate_tfvars.py`: now reads
+      `normalized["governance"].get("catalog_admin_principal")` instead
+      of `deployment.get("unity_catalog", {})`. Since `tfvars["governance"]`
+      is otherwise a direct copy of `normalized["governance"]` and
+      `var.governance`'s Terraform object type doesn't declare this key
+      (it's consumed directly by `modules/unity-catalog-workspace` as
+      its own standalone variable, not threaded through the
+      `governance` object), the key is stripped back out of
+      `tfvars["governance"]` before writing — same "exclude before
+      passthrough" pattern already used for `platform.vpc_cidr`.
+    - **Not changed**: the Terraform side (`modules/unity-catalog-workspace`'s
+      `catalog_admin_principal` variable, the `databricks_grants` resource,
+      the threading through `modules/workspace-deployment` →
+      `infrastructure/workspace`) — milestone 21's Terraform work was
+      already correctly decoupled from *where* the value originates, so
+      none of it needed to change, only the Python-side source.
+    - Verified: re-ran `resolver/main.py` for all five existing requests
+      (none of which set this field) — byte-identical `normalized/*.yaml`.
+      Confirmed the field actually flows through end-to-end with a
+      throwaway test request (`governance.catalog_admin_principal:
+      "document-ai-admins"` on a copy of `document-ai-dev`'s request) —
+      correctly appeared in the normalized output. That test accidentally
+      overwrote the real `normalized/document-ai-dev.yaml` (same
+      workspace name, not renamed first) — caught immediately via `git
+      diff`, regenerated cleanly from the real, unmodified request to
+      restore it. Regenerated `terraform.tfvars.json` for all three real
+      workspaces afterward (none set the field) — byte-identical;
+      `terraform plan` unchanged (27/34/33, same as milestone 21).
 
 ## 9. Conventions observed (keep consistent)
 

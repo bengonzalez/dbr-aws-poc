@@ -163,6 +163,12 @@ variable "existing_metastore_id" {
   default     = null
 }
 
+variable "catalog_admin_principal" {
+  description = "A Databricks user name, group name, or service principal application ID to grant ALL_PRIVILEGES on this workspace's Unity Catalog catalog. Null skips granting entirely."
+  type        = string
+  default     = null
+}
+
 
 variable "ownership" {
   description = "Workspace ownership information."

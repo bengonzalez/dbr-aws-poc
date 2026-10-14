@@ -84,7 +84,16 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
         "network": network,
         "data": normalized["data"],
         "encryption": normalized["encryption"],
-        "governance": normalized["governance"],
+        # catalog_admin_principal (when present) is surfaced separately as
+        # its own top-level var below - var.governance's object type
+        # doesn't declare it, since it's consumed directly by
+        # modules/unity-catalog-workspace, not by the governance-shaped
+        # resolver output itself.
+        "governance": {
+            key: value
+            for key, value in normalized["governance"].items()
+            if key != "catalog_admin_principal"
+        },
         "compute": normalized["compute"],
         "logging": normalized["logging"],
         "validation": normalized["validation"],
@@ -159,6 +168,20 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
         )
 
         tfvars["existing_metastore_id"] = existing_metastore_id
+
+        # Optional: who should be granted ALL_PRIVILEGES on the catalog.
+        # Requester-specified (workspace-requests/<env>/<name>.yaml's
+        # governance.catalog_admin_principal), not deployment-only - unlike
+        # vpc_id/metastore_id this is a plain passthrough string, not an
+        # infra id needing operator lookup, so the resolver already carried
+        # it into normalized.governance. Omitted entirely by default -
+        # catalog ownership then defaults to whoever runs terraform apply.
+        catalog_admin_principal = normalized["governance"].get(
+            "catalog_admin_principal"
+        )
+
+        if catalog_admin_principal is not None:
+            tfvars["catalog_admin_principal"] = catalog_admin_principal
 
     return tfvars
 

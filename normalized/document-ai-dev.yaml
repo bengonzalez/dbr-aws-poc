@@ -42,6 +42,7 @@ encryption:
 governance:
   unity_catalog: true
   workspace_binding: optional
+  catalog_admin_principal: bxg3611@hotmail.com
 compute:
   policy: development
 logging:

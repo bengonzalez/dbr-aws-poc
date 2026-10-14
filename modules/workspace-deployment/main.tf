@@ -244,6 +244,7 @@ module "unity_catalog_workspace" {
   databricks_workspace_id = databricks_mws_workspaces.this.workspace_id
   existing_metastore_id   = var.existing_metastore_id
   uc_bucket_name          = module.unity_catalog_data[0].bucket_name
+  catalog_admin_principal = var.catalog_admin_principal
 
   depends_on = [
     module.unity_catalog_data

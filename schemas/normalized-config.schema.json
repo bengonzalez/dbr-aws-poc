@@ -314,6 +314,10 @@
             "recommended",
             "optional"
           ]
+        },
+        "catalog_admin_principal": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
