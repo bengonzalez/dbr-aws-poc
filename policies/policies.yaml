@@ -1,0 +1,140 @@
+api_version: v1
+
+# All platform-wide policy the resolver enforces, in one file - merged from
+# five separate files (network/security/data/governance/validation.yaml)
+# 2026-10-14 (CLAUDE.md Sec5.13 item 4 / Sec8 milestone 18). They were
+# always loaded together and resolved in one function
+# (resolver/resolve_configuration()); nothing required five separate
+# files. Each top-level key below keeps the exact shape its old standalone
+# file had - only the loading mechanism in resolver/main.py changed.
+#
+# Only the fields resolver.py actually reads live here (same rule as
+# profiles/*.yaml - see Sec5.13/Sec8 milestone 15); each section's own
+# comments below explain what was already trimmed out before the merge.
+
+network_policy:
+  name: standard-network-policy
+  version: "1.0"
+
+  # Which network.strategy values a request may choose per environment -
+  # the single place this is enforced (Sec5.13 item 3 / Sec8 milestone
+  # 16). The request picks a strategy; this is the only thing that
+  # constrains which choices are valid for a given environment. Matches
+  # the decision baseline in CLAUDE.md Sec6: live stays platform-
+  # controlled (custom only - no self-service dedicated VPC in
+  # production), dev/stage may use either while "isolated" is proven out
+  # (Sec5.6).
+  allowed_strategies:
+    dev:
+      - custom
+      - isolated
+    stage:
+      - custom
+      - isolated
+    live:
+      - custom
+
+  strategies:
+
+    custom:
+      architecture: hybrid
+
+      resources:
+        vpc:
+          ownership: existing
+
+        subnets:
+          ownership: terraform
+
+        routing:
+          ownership: existing
+
+        security_groups:
+          ownership: terraform
+
+        endpoints:
+          ownership: existing
+
+    isolated:
+      architecture: platform_managed
+
+      resources:
+        vpc:
+          ownership: terraform
+
+        subnets:
+          ownership: terraform
+
+        routing:
+          ownership: terraform
+
+        security_groups:
+          ownership: terraform
+
+        endpoints:
+          ownership: terraform
+
+security_policy:
+  name: standard-security-policy
+  version: "1.0"
+
+  workspace:
+    encryption:
+      required: true
+
+data_policy:
+  name: standard-data-policy
+  version: "1.0"
+
+  classifications:
+
+    public:
+      encryption:
+        required: true
+
+    internal:
+      encryption:
+        required: true
+
+    sensitive:
+      encryption:
+        required: true
+
+    restricted:
+      encryption:
+        required: true
+        customer_managed_required: true
+
+governance_policy:
+  name: standard-governance-policy
+  version: "1.0"
+
+  unity_catalog:
+    required: true
+
+  workspace_binding:
+    dev: optional
+    stage: recommended
+    live: required
+
+validation_policy:
+  name: standard-validation-policy
+  version: "1.0"
+
+  defaults:
+    required: true
+    negative_tests: true
+
+  profiles:
+
+    dev:
+      blocking: false
+      evidence: standard
+
+    stage:
+      blocking: true
+      evidence: standard
+
+    live:
+      blocking: true
+      evidence: required

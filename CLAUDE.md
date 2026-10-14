@@ -117,7 +117,7 @@ requirements, security controls, Terraform behavior.
 | `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `generate_tfvars.py` turns that + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/<env>/<name>/` (§8 milestone 13). `generate_backend_config.py` turns `normalized/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (**new**, §8 milestone 14) scans every committed `deployment.yaml` for CIDR collisions/pool violations; called automatically by `generate_tfvars.py` before it writes tfvars. See §5 gaps. |
 | `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. |
 | `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely — `policies/network.yaml`'s `allowed_strategies` is now the only thing with an opinion on network strategy per environment (§8 milestone 16). |
-| `policies/{network,security,data,governance,validation}.yaml` | Working, trimmed | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping, validation blocking per env). Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads. `network.yaml` additionally gained `allowed_strategies` (per environment) 2026-10-14 (§8 milestone 16) — the single enforced rule for which `network.strategy` a request may pick per environment. |
+| `policies/policies.yaml` | Working | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping + per-environment `allowed_strategies`, validation blocking per env), one key per domain (`network_policy`, `security_policy`, `data_policy`, `governance_policy`, `validation_policy`). Trimmed to only the fields `resolver.py` actually reads (§8 milestone 15), gained `network_policy.allowed_strategies` (§8 milestone 16), then merged from five separate files into this one 2026-10-14 (§8 milestone 18 — closes §5.13's config-layer complexity review). |
 | `platform/inventory/aws.yaml` | Working, partially stale | Declares the `dev` account's primary network; `vpc.id`/`vpc.cidr` were fixed to the real values 2026-10-13 (§8 milestone 14). The actual VPC id used by Terraform still comes from `infrastructure/deployments/<env>/<name>/deployment.yaml`, not this file — the resolver never reads `vpc.id`/`vpc.cidr` from here, only the subnet `allocation` strategy. Also now declares `cidr_pools.isolated_vpc_pool` (§8 milestone 14), the reserved range for Terraform-created VPCs, checked by `resolver/check_cidr_allocations.py`. Whether the resolver should start emitting a `platform` block itself remains open (§5.3). |
 | `normalized/*.yaml` | Working — **was silently gitignored, now fixed** | Resolver output per workspace request. `CLAUDE.md` previously (incorrectly) stated these were committed; `.gitignore` actually had a stale `normalized/` rule (its own comment called it "the normalized **virtual environment** directory," which doesn't match what's in there) that had been silently excluding every file in this directory from version control. Removed 2026-10-09 — these now will be tracked going forward. |
 | `infrastructure/workspace/*.tf` | **One shared root for every workspace** (§8 milestone 12 — supersedes the per-directory approach from milestone 10) | `providers.tf`/`versions.tf` (the latter has a partial `backend "s3" {}` block — bucket/key/region supplied at `init` time, since Terraform backend blocks can't contain variables), `variables.tf`, `main.tf` (a single `module "deployment"` call into `modules/workspace-deployment`), `outputs.tf` (forwards). No per-workspace copies of any of this — every workspace uses these exact same files; only the `-var-file` and the backend-config differ per workspace. |
@@ -359,10 +359,9 @@ is to set `endpoints_ownership_override = "terraform"` for dev specifically
     - ~~Resolve `profile.schema.json`~~ — **done, see §8 milestone 17.**
     - ~~Give `network.strategy` one clear ownership rule~~ — **done, see
       §8 milestone 16.**
-    - Consider merging the five `policies/*.yaml` files into one
-      `policies.yaml` — they're small, always loaded together, and
-      resolved in one function; nothing requires five separate files.
-      **Only remaining item.**
+    - ~~Consider merging the five `policies/*.yaml` files into one
+      `policies.yaml`~~ — **done, see §8 milestone 18. This closes the
+      config-layer complexity review entirely.**
 
 ## 6. Design baseline (from project Notion notes)
 
@@ -1046,6 +1045,33 @@ Priority order agreed on:
       byte-identical.
     - Only item 4 of §5.13 remains (merge the five `policies/*.yaml`
       files into one).
+18. **Merged the five `policies/*.yaml` files into one `policies.yaml` —
+    closes item 4 of §5.13, the last item from the config-layer
+    complexity review** (2026-10-14). `network.yaml`, `security.yaml`,
+    `data.yaml`, `governance.yaml`, and `validation.yaml` were always
+    loaded together and resolved in one function
+    (`resolve_configuration()`) — nothing required five separate files.
+    Merged into `policies/policies.yaml`, with each domain keeping its
+    exact prior shape as a top-level key (`network_policy`,
+    `security_policy`, `data_policy`, `governance_policy`,
+    `validation_policy`). Only `resolver/main.py`'s loading logic
+    changed — one `load_yaml()` call instead of five, then the five
+    sub-dicts are pulled out of the single result (`policies[
+    "network_policy"]`, etc.) and passed into `resolve_configuration()`
+    exactly as before. `resolver.py` itself needed only a one-line error-
+    message path fix (it had referenced `policies/network.yaml` by name
+    in one `ValueError`); no logic changed there at all.
+    - Verified: re-ran `resolver/main.py` for all five existing requests
+      — byte-identical `normalized/*.yaml` output. Re-confirmed the
+      `live`+`isolated` rejection path from milestone 16 still fires with
+      the same message (exercising the error-message path fix above).
+      Regenerated `terraform.tfvars.json` for all three real workspaces —
+      byte-identical. Re-ran `resolver/check_cidr_allocations.py` — clean
+      pass, unaffected (it never touched policy files).
+    - This closes the config-layer complexity review from §5.13 in full:
+      all four identified items (trim profiles/policies, resolve
+      `profile.schema.json`, fix `network.strategy` ownership, merge the
+      policy files) are now done, across milestones 15-18.
 
 ## 9. Conventions observed (keep consistent)
 

@@ -141,7 +141,8 @@ def resolve_configuration(
     if allowed_strategies is None:
         raise ValueError(
             f"No allowed network strategies are defined for "
-            f"environment '{environment}' in policies/network.yaml."
+            f"environment '{environment}' in policies/policies.yaml's "
+            f"network_policy."
         )
 
     if network_strategy not in allowed_strategies:
