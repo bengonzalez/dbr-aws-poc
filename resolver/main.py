@@ -59,7 +59,16 @@ def main():
     governance_policy = load_yaml(governance_policy_path)
     validation_policy = load_yaml(validation_policy_path)
     inventory = load_yaml(inventory_path)
-    
+
+    profile_schema_path = ROOT / "schemas" / "profile.schema.json"
+
+    validate_document(
+        document=profile,
+        schema_path=profile_schema_path,
+        document_name=f"Profile '{environment}'",
+    )
+    print(f"Profile '{environment}' validation: PASS")
+
     normalized = resolve_configuration(
         request=request,
         profile=profile,

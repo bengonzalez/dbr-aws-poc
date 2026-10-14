@@ -1,3 +1,5 @@
+$schema: ../schemas/profile.schema.json
+
 api_version: v1
 
 # Only the fields resolver.py actually reads live here - see
@@ -7,6 +9,9 @@ api_version: v1
 # intent they captured is already written up in CLAUDE.md Sec6's decision
 # baseline table. Add a field back here only once resolver.py or a
 # Terraform module actually reads it.
+#
+# This schema is now actually validated (resolver/main.py, Sec8 milestone
+# 17) - not just an editor hint.
 
 profile:
   name: dev
