@@ -13,9 +13,13 @@ databricks:
   account_id: "331f8702-2e00-42e9-82e2-2935e7e1d4f9"
 
 # Only needed because network.requirements.vpc/routing.ownership resolve to
-# "existing" for this workspace (custom strategy).
+# "existing" for this workspace (custom strategy). vpc_cidr is informational
+# only (not passed to Terraform - the VPC already exists) - it lets
+# resolver/check_cidr_allocations.py confirm the subnets below actually fall
+# inside this VPC's real CIDR block.
 platform:
   vpc_id: vpc-60c2a81d
+  vpc_cidr: 172.31.0.0/16
   route_table_ids:
     - rtb-042726c440509ac14
     - rtb-0e29c295cc93c131c

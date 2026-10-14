@@ -4,6 +4,23 @@ platform:
   name: databricks-platform
   version: "1.0"
 
+# Reserved CIDR space for VPCs this factory creates itself (network.strategy
+# == "isolated" -> vpc_ownership resolves to "terraform"). Existing/"custom"
+# VPCs are untouched by this pool - their CIDR is whatever the existing VPC
+# already has, recorded informationally per-workspace instead (see
+# infrastructure/deployments/<env>/<name>/deployment.yaml's optional
+# platform.vpc_cidr field).
+#
+# Convention: pick the next unused /16 inside this range for a new isolated
+# workspace's network.vpc_cidr, then run
+# resolver/check_cidr_allocations.py (also run automatically by
+# generate_tfvars.py) to confirm it doesn't collide with another
+# workspace's already-committed deployment.yaml. This is a collision
+# checker, not an automatic allocator - the /16 itself is still a manual
+# choice. See CLAUDE.md §5.12/§8 milestone 14.
+cidr_pools:
+  isolated_vpc_pool: 10.64.0.0/10   # 10.64.0.0 - 10.127.255.255
+
 aws:
 
   accounts:
@@ -24,8 +41,8 @@ aws:
 
               vpc:
                 ownership: existing
-                id: vpc-PLACEHOLDER
-                cidr: 10.20.0.0/16
+                id: vpc-60c2a81d
+                cidr: 172.31.0.0/16
 
               subnets:
 

@@ -114,11 +114,11 @@ requirements, security controls, Terraform behavior.
 | Path | Status | Notes |
 |---|---|---|
 | `workspace-requests/{dev,stage,live}/` | Working | Minimal requester input YAML. One `document-ai` request per env exists as the test case. |
-| `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `generate_tfvars.py` turns that + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/<env>/<name>/` (§8 milestone 13). `generate_backend_config.py` turns `normalized/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). See §5 gaps. |
+| `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `generate_tfvars.py` turns that + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/<env>/<name>/` (§8 milestone 13). `generate_backend_config.py` turns `normalized/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (**new**, §8 milestone 14) scans every committed `deployment.yaml` for CIDR collisions/pool violations; called automatically by `generate_tfvars.py` before it writes tfvars. See §5 gaps. |
 | `schemas/` | Working, has a gap | `workspace-request.schema.json`, `normalized-config.schema.json` actively used. `profile.schema.json` exists but is **never actually validated against** — see §5. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. |
 | `profiles/{dev,stage,live}.yaml` | Working, inconsistent | Per-environment defaults. `dev.yaml` is missing a `network.architecture` key that `stage.yaml`/`live.yaml` both have — not currently caught because profile.schema.json validation isn't wired in. |
 | `policies/{network,security,data,governance,validation}.yaml` | Working | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping, validation blocking per env). |
-| `platform/inventory/aws.yaml` | Stale placeholder, still unused | Declares the `dev` account's primary network, but `vpc.id` is still `vpc-PLACEHOLDER` — never updated to the real `vpc-60c2a81d` even though the resolver reads this file. The actual VPC id is supplied via `infrastructure/deployments/<env>/<name>/deployment.yaml` instead — a deliberate choice to keep this inventory file and the resolver untouched for now. Still worth fixing the placeholder eventually (§5.3), just no longer blocking anything. |
+| `platform/inventory/aws.yaml` | Working, partially stale | Declares the `dev` account's primary network; `vpc.id`/`vpc.cidr` were fixed to the real values 2026-10-13 (§8 milestone 14). The actual VPC id used by Terraform still comes from `infrastructure/deployments/<env>/<name>/deployment.yaml`, not this file — the resolver never reads `vpc.id`/`vpc.cidr` from here, only the subnet `allocation` strategy. Also now declares `cidr_pools.isolated_vpc_pool` (§8 milestone 14), the reserved range for Terraform-created VPCs, checked by `resolver/check_cidr_allocations.py`. Whether the resolver should start emitting a `platform` block itself remains open (§5.3). |
 | `normalized/*.yaml` | Working — **was silently gitignored, now fixed** | Resolver output per workspace request. `CLAUDE.md` previously (incorrectly) stated these were committed; `.gitignore` actually had a stale `normalized/` rule (its own comment called it "the normalized **virtual environment** directory," which doesn't match what's in there) that had been silently excluding every file in this directory from version control. Removed 2026-10-09 — these now will be tracked going forward. |
 | `infrastructure/workspace/*.tf` | **One shared root for every workspace** (§8 milestone 12 — supersedes the per-directory approach from milestone 10) | `providers.tf`/`versions.tf` (the latter has a partial `backend "s3" {}` block — bucket/key/region supplied at `init` time, since Terraform backend blocks can't contain variables), `variables.tf`, `main.tf` (a single `module "deployment"` call into `modules/workspace-deployment`), `outputs.tf` (forwards). No per-workspace copies of any of this — every workspace uses these exact same files; only the `-var-file` and the backend-config differ per workspace. |
 | `infrastructure/workspace/backend.tfbackend` | **Working** (§8 milestone 13) | Committed, idempotently rewritten every time `generate_backend_config.py` runs for *any* workspace: `bucket`/`region`/`use_lockfile` — identical for every workspace, so this stays a single shared file instead of being repeated in each per-workspace backend-config file. Never hand-edit. |
@@ -332,26 +332,52 @@ is to set `endpoints_ownership_override = "terraform"` for dev specifically
     subnet + IGW to `modules/workspace-network` when selected, gated the
     same way as everything else in this ownership-override system. Not
     started.
-12. **No CIDR allocation or collision tracking across workspaces.** Every
-    concrete CIDR value (`network.vpc_cidr` and each
-    `network.subnets.private[].cidr`) is hand-picked and typed directly
-    into a workspace's `infrastructure/deployments/<env>/<name>/
-    deployment.yaml` — the resolver never produces one. `resolver.py` only
-    ever reads `platform/inventory/aws.yaml`'s subnet `allocation` block
-    for a *strategy* (count/AZs/`cidr_source` label), never an actual CIDR.
-    That inventory file's own `vpc.cidr: 10.20.0.0/16` (§5.3) is unused
-    and stale — it doesn't even match the real existing VPC's CIDR
-    (`vpc-60c2a81d` is `172.31.0.0/16`). Nothing in this codebase checks
-    whether a newly-chosen `vpc_cidr` (for an `isolated` workspace) or a
-    newly-chosen subnet range (for either strategy) collides with another
-    workspace's already-deployed network — the only way to avoid a
-    collision today is to manually read every other workspace's
-    `deployment.yaml` before picking new values. Low risk at the current
-    scale (three workspaces, two of them destroyed), but will not scale
-    past a handful of concurrent `isolated` workspaces without some kind
-    of central CIDR registry/allocator — likely the natural extension of
-    fixing `platform/inventory/aws.yaml` (§5.3) rather than a separate
-    mechanism. Not started.
+12. **No CIDR allocation or collision tracking across workspaces — fixed,
+    see §8 milestone 14.** Every concrete CIDR value (`network.vpc_cidr`
+    and each `network.subnets.private[].cidr`) was hand-picked and typed
+    directly into a workspace's `deployment.yaml` with nothing checking
+    for collisions against any other workspace. §8 milestone 14 adds a
+    documented reserved pool for `isolated`-strategy VPCs
+    (`platform/inventory/aws.yaml`'s new `cidr_pools.isolated_vpc_pool`)
+    and a standalone collision checker
+    (`resolver/check_cidr_allocations.py`, wired into
+    `generate_tfvars.py`) that scans every committed `deployment.yaml` and
+    fails loudly on overlap before tfvars are generated. Picking the
+    value is still manual — this is a check, not an allocator — but
+    collisions are no longer silent.
+13. **Config-layer complexity review (2026-10-13) — remaining items not
+    yet started.** Triggered by the CIDR-collision gap above: the user
+    asked for a full review of `workspace-requests/`, `profiles/`,
+    `policies/`, and `platform/inventory/` to judge whether the
+    request → profile → policy → resolver design has gotten too complex.
+    Finding: the layering itself is reasonable, but there's a real gap
+    between what's *declared* in profiles/policies and what `resolver.py`
+    actually *reads* — most profile/policy fields are decorative today
+    (see the finding written up in conversation; not duplicated here to
+    avoid drift from the live code). Four follow-up items were identified
+    and explicitly deferred (user's call: tackle CIDR first, revisit these
+    one at a time afterward) — **not started**:
+    - Trim `profiles/*.yaml` and `policies/*.yaml` down to only the
+      fields `resolver.py` actually reads; move or delete the rest
+      (`storage.*`, `governance.*`, `identity.*`, `validation.*`,
+      `lifecycle.*`, `approval.*` in profiles; `validation.yaml`'s
+      `checks:` block; `data.yaml`'s per-classification
+      `governance.unity_catalog` duplicate; `security.yaml`'s `identity.*`
+      /`iam.*`/`workspace.public_access`) — all currently unread by any
+      code path.
+    - Resolve `profile.schema.json` (§5.1): either wire it into
+      `main.py` for real validation (against a shrunk profile shape, once
+      the item above lands) or delete it — 346 lines of schema that
+      nothing invokes today.
+    - Give `network.strategy` one clear ownership rule: the resolver
+      reads it from the **request** (`resolver.py:121`), never from the
+      profile, even though profiles also declare a `network.strategy`
+      field — that field is dead and the two are never cross-checked.
+      Either delete the profile's copy, or have the resolver validate the
+      request's choice against what the profile/environment allows.
+    - Consider merging the five `policies/*.yaml` files into one
+      `policies.yaml` — they're small, always loaded together, and
+      resolved in one function; nothing requires five separate files.
 
 ## 6. Design baseline (from project Notion notes)
 
@@ -863,6 +889,67 @@ Priority order agreed on:
       and `terraform plan` against each — same exact resource counts as
       milestone 12 (16, 23, 22), confirming this was a pure file-layout
       change with no functional effect.
+14. **CIDR collision checker + reserved isolated-VPC pool — closes §5.12**
+    (2026-10-13, same day). Triggered directly by the user asking how
+    VPC/subnet CIDRs get defined and flagging that nothing prevented two
+    workspaces from picking the same range. Led to a broader request to
+    review `workspace-requests/`, `profiles/`, `policies/`, and
+    `platform/inventory/` for whether the whole config-layer design has
+    gotten too complex — see §5.13 for the four items identified there and
+    explicitly deferred (user's call: fix CIDR first, revisit the rest one
+    at a time). This milestone is the CIDR fix only:
+    - `platform/inventory/aws.yaml`'s dev VPC placeholder
+      (`vpc.id: vpc-PLACEHOLDER`, `vpc.cidr: 10.20.0.0/16`) was finally
+      fixed to the real values (`vpc-60c2a81d`, `172.31.0.0/16`) — closes
+      the stale-placeholder half of §5.3 (the "should the resolver emit a
+      `platform` block" half is still open).
+    - New `cidr_pools.isolated_vpc_pool: 10.64.0.0/10` added to
+      `platform/inventory/aws.yaml` — the reserved range for VPCs this
+      factory creates itself (`isolated` strategy). This is the direct
+      answer to "where does the base begin": previously that was just
+      whatever CIDR the prior session happened to pick
+      (`isolated-proof` used `10.70.0.0/16` with no written-down reason).
+      Existing/`custom`-strategy VPCs aren't part of this pool — their
+      CIDR is whatever the existing VPC already has.
+    - New `resolver/check_cidr_allocations.py`: scans every committed
+      `infrastructure/deployments/*/*/deployment.yaml`, using the stdlib
+      `ipaddress` module to check (a) every `isolated` workspace's
+      `network.vpc_cidr` falls inside the reserved pool above, (b) no two
+      `isolated` workspaces' VPC CIDRs overlap each other, (c) every
+      subnet CIDR is actually contained within its own workspace's VPC
+      CIDR, and (d) no two workspaces that reference the *same* existing
+      `platform.vpc_id` have overlapping subnet CIDRs. Raises `ValueError`
+      with a specific, actionable message on the first violation found
+      (same fail-fast convention as the rest of the resolver scripts).
+      This is a **checker, not an allocator** — the operator still picks
+      the CIDR by hand; this only stops a collision from being silent.
+    - New optional `platform.vpc_cidr` field in `deployment.yaml` (for
+      `custom`-strategy workspaces reusing an existing VPC) — purely
+      informational, lets the checker validate subnet containment against
+      that VPC's real CIDR. Backfilled for `document-ai-dev`
+      (`172.31.0.0/16`) and `client-vpc-proof` (`10.80.0.0/16`).
+      `generate_tfvars.py`'s `build_tfvars()` strips this key back out
+      before writing `terraform.tfvars.json` — `var.platform`'s object
+      type in `variables.tf` doesn't declare it, and Terraform doesn't
+      need it (the VPC already exists), so it would otherwise fail
+      Terraform's strict object-type conversion.
+    - Wired into `resolver/generate_tfvars.py`: calls
+      `check_cidr_allocations.check_all()` right after loading the target
+      workspace's `deployment.yaml`, before building or writing
+      `terraform.tfvars.json` — a collision or pool violation anywhere
+      blocks tfvars generation for *any* workspace until fixed, not just
+      the one that introduced it.
+    - Verified by deliberately introducing three different violations
+      (an isolated-VPC-to-isolated-VPC overlap reusing `isolated-proof`'s
+      `10.70.0.0/16`, a VPC CIDR outside the reserved pool, and a
+      same-existing-VPC subnet overlap against `document-ai-dev`) in a
+      throwaway test workspace directory and confirming each one is
+      caught with the right message, then removing the test directory and
+      re-confirming a clean `PASS`. Re-ran `generate_tfvars.py` for all
+      three real workspaces afterward — identical `terraform.tfvars.json`
+      output (confirmed the new `platform.vpc_cidr` field doesn't leak
+      through) and identical `terraform plan` resource counts (16, 23,
+      22) as every prior verification.
 
 ## 9. Conventions observed (keep consistent)
 

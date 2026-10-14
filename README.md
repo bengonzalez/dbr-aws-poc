@@ -117,12 +117,26 @@ Run these from the repository root unless noted otherwise.
    settings. Copy an existing workspace's `deployment.yaml` as a starting
    template.
 
+   **Picking CIDRs**: for a brand-new dedicated VPC (`isolated` strategy),
+   pick an unused `/16` inside the reserved range declared in
+   `platform/inventory/aws.yaml`'s `cidr_pools.isolated_vpc_pool`, then
+   subnet ranges inside it. For an existing VPC (`custom` strategy), pick
+   subnet ranges that fit inside that VPC's real CIDR and don't collide
+   with any other workspace already using it (and record that VPC's CIDR
+   under `platform.vpc_cidr` so the next step can check containment).
+   This is still a manual choice, not automatic allocation — see the next
+   step for how collisions get caught.
+
 4. **Generate the Terraform inputs.**
    ```
    python resolver/generate_tfvars.py --workspace <name>
    python resolver/generate_backend_config.py --workspace <name>
    ```
-   Produces `infrastructure/deployments/<env>/<name>/terraform.tfvars.json`
+   `generate_tfvars.py` first runs `resolver/check_cidr_allocations.py`
+   against every committed workspace's `deployment.yaml` and fails loudly
+   if the CIDRs you just picked overlap another workspace's VPC/subnets or
+   fall outside the reserved isolated-VPC pool — fix `deployment.yaml` and
+   re-run if so. Produces `infrastructure/deployments/<env>/<name>/terraform.tfvars.json`
    and `.../backend.tfbackend` (just this workspace's state `key`), and
    (re)writes `infrastructure/workspace/backend.tfbackend` (the
    bucket/region/use_lockfile settings shared by every workspace).

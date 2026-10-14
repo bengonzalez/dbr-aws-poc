@@ -21,8 +21,12 @@ databricks:
   # Enterprise tier, which the original 331f8702... account doesn't have).
   account_id: "eddbb85f-6b3c-4261-8ca2-0d9d62575ce2"
 
+# vpc_cidr is informational only (not passed to Terraform - the VPC already
+# exists) - it lets resolver/check_cidr_allocations.py confirm the subnets
+# below actually fall inside this VPC's real CIDR block.
 platform:
   vpc_id: vpc-09171a1d77c4f8cea
+  vpc_cidr: 10.80.0.0/16
 
 network:
   subnets:

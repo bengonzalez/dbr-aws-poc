@@ -3,6 +3,7 @@ import argparse
 import json
 
 from loader import load_yaml
+from check_cidr_allocations import check_all as check_cidr_allocations
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -93,7 +94,13 @@ def build_tfvars(normalized: dict, deployment: dict) -> dict:
     platform = deployment.get("platform")
 
     if platform:
-        tfvars["platform"] = platform
+        # vpc_cidr (when present) is informational only, for
+        # check_cidr_allocations.py's containment check against an existing
+        # VPC - var.platform's object type doesn't declare it and Terraform
+        # doesn't need it (the VPC already exists), so it's excluded here.
+        tfvars["platform"] = {
+            key: value for key, value in platform.items() if key != "vpc_cidr"
+        }
 
     if vpc_cidr is not None:
         tfvars["vpc_cidr"] = vpc_cidr
@@ -185,6 +192,10 @@ def main() -> None:
     )
 
     deployment = load_yaml(deployment_path)
+
+    # Check this (and every other committed workspace's) CIDR allocations
+    # for collisions before generating anything Terraform would act on.
+    check_cidr_allocations()
 
     tfvars = build_tfvars(normalized, deployment)
 
