@@ -34,5 +34,8 @@ __pycache__/
 # Operator-local Databricks CLI profile name. This differs per person/machine
 # and should never be committed. Terraform auto-loads this file alongside
 # whatever -var-file is passed for a given workspace. Copy
-# local.auto.tfvars.example to get started.
-infrastructure/workspace/local.auto.tfvars
+# local.auto.tfvars.example to get started - one shared file in
+# infrastructure/workspace/ satisfies every workspace, since they all run
+# through the same Terraform root. TF_VAR_databricks_profile (env var) works
+# just as well and needs no file at all.
+infrastructure/workspace/**/local.auto.tfvars

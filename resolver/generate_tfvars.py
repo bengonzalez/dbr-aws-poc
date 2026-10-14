@@ -135,10 +135,13 @@ def main() -> None:
         help=(
             "Workspace name. By default, looks for "
             "normalized/<workspace>.yaml and "
-            "infrastructure/workspace/<workspace>/deployment.yaml (the "
-            "per-workspace directory convention). Pass --deployment/--output "
-            "explicitly for workspaces still on the legacy flat layout "
-            "(e.g. document-ai-dev)."
+            "infrastructure/deployments/<environment>/<workspace>/"
+            "deployment.yaml (environment read from the normalized file), "
+            "writing infrastructure/deployments/<environment>/<workspace>/"
+            "terraform.tfvars.json. All workspaces share the one Terraform "
+            "root in infrastructure/workspace/ - see "
+            "resolver/generate_backend_config.py for selecting which "
+            "workspace's state that root points at."
         ),
     )
 
@@ -164,22 +167,28 @@ def main() -> None:
         else ROOT / "normalized" / f"{args.workspace}.yaml"
     )
 
-    workspace_dir = ROOT / "infrastructure" / "workspace" / args.workspace
+    normalized = load_yaml(normalized_path)
+    environment = normalized["workspace"]["environment"]
+
+    deployment_dir = (
+        ROOT / "infrastructure" / "deployments" / environment / args.workspace
+    )
 
     deployment_path = (
         Path(args.deployment) if args.deployment
-        else workspace_dir / "deployment.yaml"
+        else deployment_dir / "deployment.yaml"
     )
 
     output_path = (
         Path(args.output) if args.output
-        else workspace_dir / "terraform.tfvars.json"
+        else deployment_dir / "terraform.tfvars.json"
     )
 
-    normalized = load_yaml(normalized_path)
     deployment = load_yaml(deployment_path)
 
     tfvars = build_tfvars(normalized, deployment)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with output_path.open("w", encoding="utf-8") as file:
         json.dump(tfvars, file, indent=2, sort_keys=False)

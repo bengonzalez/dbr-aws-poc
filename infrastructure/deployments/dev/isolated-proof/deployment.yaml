@@ -1,0 +1,34 @@
+# Deployment-only values for the "isolated-proof" workspace - a real proof
+# that the factory can build a fully isolated deployment (dedicated VPC,
+# subnets, routing, security group, S3/STS endpoints) end to end, the same
+# shape the original POC built by hand.
+#
+# Destroyed 2026-10-13 as part of moving to the shared-root + S3-backend
+# model (CLAUDE.md) - this file is kept so the workspace can be redeployed
+# the same way later: regenerate via resolver/generate_tfvars.py and
+# resolver/generate_backend_config.py, then terraform init/apply.
+
+api_version: v1
+
+databricks:
+  # Second account created specifically to test PrivateLink (requires
+  # Enterprise tier, which the original 331f8702... account doesn't have).
+  account_id: "eddbb85f-6b3c-4261-8ca2-0d9d62575ce2"
+
+# No "platform" block - the isolated strategy creates its own dedicated VPC,
+# nothing pre-existing to point at.
+
+network:
+  vpc_cidr: 10.70.0.0/16
+  subnets:
+    private:
+      - cidr: 10.70.0.0/24
+        availability_zone: us-east-1a
+      - cidr: 10.70.1.0/24
+        availability_zone: us-east-1b
+
+overrides:
+  # PrivateLink requires Enterprise tier - confirmed unavailable on both
+  # accounts tried. Generic S3/STS endpoints still get built; NAT is a
+  # possible future fallback for full connectivity - see CLAUDE.md TODO.
+  privatelink_enabled: false

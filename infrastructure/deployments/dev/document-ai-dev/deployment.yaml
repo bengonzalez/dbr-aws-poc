@@ -5,7 +5,7 @@
 #
 # This file is committed (it's infrastructure configuration, not a secret).
 # The Databricks CLI profile used to run Terraform is NOT here — see
-# local.auto.tfvars.example.
+# infrastructure/workspace/local.auto.tfvars.example.
 
 api_version: v1
 
@@ -22,6 +22,10 @@ platform:
 
 # Always needed: Terraform always creates the private subnets themselves,
 # regardless of VPC ownership.
+#
+# network.vpc_cidr would go here too, but only when VPC ownership resolves
+# to "terraform" (the isolated strategy's default, or an override below) -
+# not needed for this workspace since it reuses the existing VPC above.
 network:
   subnets:
     private:
@@ -34,7 +38,6 @@ network:
 # network.strategy preset for one specific resource):
 # overrides:
 #   vpc_ownership: terraform
-#   vpc_cidr: 10.60.0.0/16
 #   routing_ownership: terraform
 #   security_group_ownership: terraform
 #   endpoints_ownership: terraform

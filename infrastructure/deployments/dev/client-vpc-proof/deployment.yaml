@@ -1,0 +1,41 @@
+# Deployment-only values for the "client-vpc-proof" workspace - a real proof
+# of the actual client delivery scenario: a VPC is handed to us pre-built
+# (here, a deliberately bare VPC stood up manually via AWS CLI to simulate
+# the minimum a client would provide - no subnets, no route tables), and the
+# factory builds everything else: subnets, routing, security group, S3/STS
+# endpoints.
+#
+# network.strategy is "custom" (vpc_ownership defaults to "existing"), but
+# routing and endpoints default to "existing" under custom too - this
+# client only gave us the VPC itself, so both are overridden to "terraform".
+#
+# Destroyed 2026-10-13 as part of moving to the shared-root + S3-backend
+# model (CLAUDE.md) - this file is kept so the workspace can be redeployed
+# the same way later. The bare "client" VPC (vpc-09171a1d77c4f8cea) below is
+# still live (never Terraform-managed, so unaffected by the destroy).
+
+api_version: v1
+
+databricks:
+  # Second account created specifically to test PrivateLink (requires
+  # Enterprise tier, which the original 331f8702... account doesn't have).
+  account_id: "eddbb85f-6b3c-4261-8ca2-0d9d62575ce2"
+
+platform:
+  vpc_id: vpc-09171a1d77c4f8cea
+
+network:
+  subnets:
+    private:
+      - cidr: 10.80.0.0/24
+        availability_zone: us-east-1a
+      - cidr: 10.80.1.0/24
+        availability_zone: us-east-1b
+
+overrides:
+  routing_ownership: terraform
+  endpoints_ownership: terraform
+  # PrivateLink requires Enterprise tier - confirmed unavailable on both
+  # accounts tried. Generic S3/STS endpoints still get built; NAT is a
+  # possible future fallback for full connectivity - see CLAUDE.md TODO.
+  privatelink_enabled: false

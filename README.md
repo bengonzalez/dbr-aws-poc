@@ -25,8 +25,9 @@ requester having to specify any AWS-level details themselves.
 │   ├── main.py                      # workspace-request → normalized/<name>.yaml
 │   ├── resolver.py                  # core resolution logic (profiles + policies)
 │   ├── loader.py / validator.py     # YAML loading + JSON Schema validation
-│   ├── generate_tfvars.py           # normalized + deployment.yaml → <name>.tfvars.json
-│   └── generate_backend_config.py   # normalized → <name>.s3.tfbackend
+│   ├── generate_tfvars.py           # normalized + deployment.yaml → terraform.tfvars.json
+│   └── generate_backend_config.py   # normalized → backend.tfbackend (both the per-workspace
+│                                     #   key file and the shared bucket/region/use_lockfile file)
 │
 ├── schemas/                         # JSON Schemas: workspace-request, normalized-config, profile
 ├── profiles/{dev,stage,live}.yaml   # Per-environment platform defaults
@@ -41,12 +42,17 @@ requester having to specify any AWS-level details themselves.
 │   │   ├── main.tf                  # Single `module "deployment"` call
 │   │   ├── outputs.tf               # Forwards module outputs
 │   │   │
-│   │   ├── <name>.deployment.yaml   # Per workspace, committed: existing resource ids,
-│   │   │                            #   concrete subnet CIDRs, optional overrides
-│   │   ├── <name>.tfvars.json       # Per workspace, GENERATED - never hand-edit
-│   │   ├── <name>.s3.tfbackend      # Per workspace, GENERATED - never hand-edit
-│   │   │
+│   │   ├── backend.tfbackend        # GENERATED (and idempotent - same content every run):
+│   │   │                            #   bucket/region/use_lockfile, identical for every workspace
 │   │   └── local.auto.tfvars        # Gitignored: your own Databricks CLI profile name
+│   │
+│   ├── deployments/                 # Per-workspace deployment files, grouped by workspace -
+│   │   └── <env>/<name>/            #   kept separate from workspace-requests/ (requester-facing
+│   │       ├── deployment.yaml      #   input) and infrastructure/workspace/ (shared TF root)
+│   │       ├── terraform.tfvars.json#   deployment.yaml: committed, hand-maintained (existing
+│   │       └── backend.tfbackend    #   resource ids, concrete subnet CIDRs, overrides).
+│   │                                #   terraform.tfvars.json / backend.tfbackend (the per-
+│   │                                #   workspace `key` line only): GENERATED - never hand-edit.
 │   │
 │   ├── nonprod/poc/                 # Frozen original proof of concept - reference only
 │   ├── platform/                    # Reserved, empty (no shared/cross-workspace state exists)
@@ -70,7 +76,7 @@ requester having to specify any AWS-level details themselves.
 **There is exactly one copy of the Terraform code** (`infrastructure/workspace/`
 + `modules/`). Every workspace — `dev`, `stage`, `live`, however many there
 end up being — runs through that same root. Nothing per-workspace gets
-copied except the three small files listed above.
+copied except the small per-workspace directory under `infrastructure/deployments/`.
 
 ## Prerequisites
 
@@ -104,19 +110,22 @@ Run these from the repository root unless noted otherwise.
    Produces `normalized/<name>.yaml` — the fully resolved configuration.
 
 3. **Write the deployment file.** Create
-   `infrastructure/workspace/<name>.deployment.yaml` with the handful of
-   concrete values the resolver doesn't produce: existing VPC id / route
-   table ids (if reusing an existing network), concrete subnet CIDRs, and
-   any per-resource ownership overrides or bring-your-own-key settings.
-   Copy an existing `*.deployment.yaml` as a starting template.
+   `infrastructure/deployments/<env>/<name>/deployment.yaml` with the
+   handful of concrete values the resolver doesn't produce: existing VPC id
+   / route table ids (if reusing an existing network), concrete subnet
+   CIDRs, and any per-resource ownership overrides or bring-your-own-key
+   settings. Copy an existing workspace's `deployment.yaml` as a starting
+   template.
 
 4. **Generate the Terraform inputs.**
    ```
    python resolver/generate_tfvars.py --workspace <name>
    python resolver/generate_backend_config.py --workspace <name>
    ```
-   Produces `infrastructure/workspace/<name>.tfvars.json` and
-   `infrastructure/workspace/<name>.s3.tfbackend`.
+   Produces `infrastructure/deployments/<env>/<name>/terraform.tfvars.json`
+   and `.../backend.tfbackend` (just this workspace's state `key`), and
+   (re)writes `infrastructure/workspace/backend.tfbackend` (the
+   bucket/region/use_lockfile settings shared by every workspace).
 
 5. **Set your Databricks CLI profile.** Either export it for the shell
    session (`export TF_VAR_databricks_profile="your-profile-name"`) or copy
@@ -124,15 +133,19 @@ Run these from the repository root unless noted otherwise.
    `local.auto.tfvars` and fill it in (gitignored, never committed).
 
 6. **Point the shared root at this workspace's state.** From
-   `infrastructure/workspace/`:
+   `infrastructure/workspace/`, pass **both** backend-config files - the
+   shared one first, then this workspace's:
    ```
-   terraform init -backend-config=<name>.s3.tfbackend -reconfigure -input=false
+   terraform init \
+     -backend-config=backend.tfbackend \
+     -backend-config=../deployments/<env>/<name>/backend.tfbackend \
+     -reconfigure -input=false
    ```
 
 7. **Plan, review, then apply.**
    ```
-   terraform plan  -var-file=<name>.tfvars.json
-   terraform apply -var-file=<name>.tfvars.json
+   terraform plan  -var-file=../deployments/<env>/<name>/terraform.tfvars.json
+   terraform apply -var-file=../deployments/<env>/<name>/terraform.tfvars.json
    ```
    Read the plan before applying. See warnings below.
 
@@ -145,10 +158,10 @@ Run these from the repository root unless noted otherwise.
   workspace, Terraform will propose **destroying that other workspace**
   and creating this one instead. This is the single most important rule
   in this repository.
-- **Never hand-edit `<name>.tfvars.json` or `<name>.s3.tfbackend`.** Both
-  are generated from `normalized/<name>.yaml` and `<name>.deployment.yaml`.
-  Manual edits will silently drift from the source of truth and be
-  overwritten the next time someone regenerates them.
+- **Never hand-edit `terraform.tfvars.json` or either `backend.tfbackend`
+  file.** All three are generated from `normalized/<name>.yaml` and
+  `deployment.yaml`. Manual edits will silently drift from the source of
+  truth and be overwritten the next time someone regenerates them.
 - **Always read the plan before applying.** An unexpected `destroy` in the
   plan almost always means you're pointed at the wrong workspace's state
   (see the first warning), not that something is actually wrong with the
@@ -178,9 +191,10 @@ the intended shape so the manual steps above translate directly into
 pipeline stages when it's built.
 
 **Trigger**: a merge request that adds or changes a file under
-`workspace-requests/**/*.yaml` or `infrastructure/workspace/*.deployment.yaml`.
-Use `rules: changes` to detect which file changed and derive `<name>` from
-its filename — each pipeline run should operate on exactly one workspace.
+`workspace-requests/**/*.yaml` or
+`infrastructure/deployments/**/deployment.yaml`. Use `rules: changes` to
+detect which file changed and derive `<env>`/`<name>` from its path — each
+pipeline run should operate on exactly one workspace.
 
 **Stages** (one job per stage, each consuming the previous stage's
 artifacts):
@@ -188,16 +202,20 @@ artifacts):
 1. **resolve** — run `resolver/main.py` for the changed request. Artifact:
    `normalized/<name>.yaml`.
 2. **generate** — run `generate_tfvars.py` and `generate_backend_config.py`.
-   Artifacts: `<name>.tfvars.json`, `<name>.s3.tfbackend`.
+   Artifacts: `infrastructure/deployments/<env>/<name>/terraform.tfvars.json`,
+   `.../backend.tfbackend`, and `infrastructure/workspace/backend.tfbackend`.
 3. **validate** — `terraform fmt -check -recursive`, then `terraform init
-   -backend-config=<name>.s3.tfbackend -reconfigure -input=false` and
-   `terraform validate`. A fresh pipeline run always starts with a clean
-   checkout, so there's no "forgot to reconfigure" risk here the way there
-   is for manual/local use.
-4. **plan** — `terraform plan -var-file=<name>.tfvars.json -out=plan.tfplan`.
-   Post the plan as an MR comment (`gitlab-terraform` style tooling, or a
-   simple script piping `terraform show -no-color plan.tfplan`) so a
-   reviewer can read it before anything is applied. Artifact: `plan.tfplan`.
+   -backend-config=backend.tfbackend
+   -backend-config=../deployments/<env>/<name>/backend.tfbackend
+   -reconfigure -input=false` and `terraform validate`. A fresh pipeline run
+   always starts with a clean checkout, so there's no "forgot to
+   reconfigure" risk here the way there is for manual/local use.
+4. **plan** — `terraform plan
+   -var-file=../deployments/<env>/<name>/terraform.tfvars.json
+   -out=plan.tfplan`. Post the plan as an MR comment (`gitlab-terraform`
+   style tooling, or a simple script piping `terraform show -no-color
+   plan.tfplan`) so a reviewer can read it before anything is applied.
+   Artifact: `plan.tfplan`.
 5. **apply** — `terraform apply plan.tfplan`. Make this job
    `when: manual` and run it in a **protected GitLab environment**
    requiring approval — never apply automatically on merge, at least until

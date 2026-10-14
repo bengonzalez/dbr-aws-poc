@@ -127,6 +127,12 @@ variable "existing_security_group_id" {
   default     = null
 }
 
+variable "privatelink_enabled_override" {
+  description = "Override whether Databricks PrivateLink is built, independent of endpoints_ownership. Null defers to the default (on whenever endpoints are terraform-owned). Set to false on accounts without Enterprise tier, which PrivateLink requires."
+  type        = bool
+  default     = null
+}
+
 variable "existing_workspace_storage_key_arn" {
   description = "ARN of an existing KMS key to use for workspace storage instead of creating a dedicated one."
   type        = string
