@@ -332,6 +332,26 @@ is to set `endpoints_ownership_override = "terraform"` for dev specifically
     subnet + IGW to `modules/workspace-network` when selected, gated the
     same way as everything else in this ownership-override system. Not
     started.
+12. **No CIDR allocation or collision tracking across workspaces.** Every
+    concrete CIDR value (`network.vpc_cidr` and each
+    `network.subnets.private[].cidr`) is hand-picked and typed directly
+    into a workspace's `infrastructure/deployments/<env>/<name>/
+    deployment.yaml` — the resolver never produces one. `resolver.py` only
+    ever reads `platform/inventory/aws.yaml`'s subnet `allocation` block
+    for a *strategy* (count/AZs/`cidr_source` label), never an actual CIDR.
+    That inventory file's own `vpc.cidr: 10.20.0.0/16` (§5.3) is unused
+    and stale — it doesn't even match the real existing VPC's CIDR
+    (`vpc-60c2a81d` is `172.31.0.0/16`). Nothing in this codebase checks
+    whether a newly-chosen `vpc_cidr` (for an `isolated` workspace) or a
+    newly-chosen subnet range (for either strategy) collides with another
+    workspace's already-deployed network — the only way to avoid a
+    collision today is to manually read every other workspace's
+    `deployment.yaml` before picking new values. Low risk at the current
+    scale (three workspaces, two of them destroyed), but will not scale
+    past a handful of concurrent `isolated` workspaces without some kind
+    of central CIDR registry/allocator — likely the natural extension of
+    fixing `platform/inventory/aws.yaml` (§5.3) rather than a separate
+    mechanism. Not started.
 
 ## 6. Design baseline (from project Notion notes)
 
