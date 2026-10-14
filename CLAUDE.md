@@ -116,8 +116,8 @@ requirements, security controls, Terraform behavior.
 | `workspace-requests/{dev,stage,live}/` | Working | Minimal requester input YAML. One `document-ai` request per env exists as the test case. |
 | `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `generate_tfvars.py` turns that + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/<env>/<name>/` (§8 milestone 13). `generate_backend_config.py` turns `normalized/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (**new**, §8 milestone 14) scans every committed `deployment.yaml` for CIDR collisions/pool violations; called automatically by `generate_tfvars.py` before it writes tfvars. See §5 gaps. |
 | `schemas/` | Working, has a gap | `workspace-request.schema.json`, `normalized-config.schema.json` actively used. `profile.schema.json` exists but is **never actually validated against** — see §5. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. |
-| `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely (the resolver takes network strategy from the request, not the profile — see §5.13 item 3, still open). |
-| `policies/{network,security,data,governance,validation}.yaml` | Working, trimmed | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping, validation blocking per env). Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads — see that milestone for exactly what was removed from each file and why. |
+| `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely — `policies/network.yaml`'s `allowed_strategies` is now the only thing with an opinion on network strategy per environment (§8 milestone 16). |
+| `policies/{network,security,data,governance,validation}.yaml` | Working, trimmed | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping, validation blocking per env). Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads. `network.yaml` additionally gained `allowed_strategies` (per environment) 2026-10-14 (§8 milestone 16) — the single enforced rule for which `network.strategy` a request may pick per environment. |
 | `platform/inventory/aws.yaml` | Working, partially stale | Declares the `dev` account's primary network; `vpc.id`/`vpc.cidr` were fixed to the real values 2026-10-13 (§8 milestone 14). The actual VPC id used by Terraform still comes from `infrastructure/deployments/<env>/<name>/deployment.yaml`, not this file — the resolver never reads `vpc.id`/`vpc.cidr` from here, only the subnet `allocation` strategy. Also now declares `cidr_pools.isolated_vpc_pool` (§8 milestone 14), the reserved range for Terraform-created VPCs, checked by `resolver/check_cidr_allocations.py`. Whether the resolver should start emitting a `platform` block itself remains open (§5.3). |
 | `normalized/*.yaml` | Working — **was silently gitignored, now fixed** | Resolver output per workspace request. `CLAUDE.md` previously (incorrectly) stated these were committed; `.gitignore` actually had a stale `normalized/` rule (its own comment called it "the normalized **virtual environment** directory," which doesn't match what's in there) that had been silently excluding every file in this directory from version control. Removed 2026-10-09 — these now will be tracked going forward. |
 | `infrastructure/workspace/*.tf` | **One shared root for every workspace** (§8 milestone 12 — supersedes the per-directory approach from milestone 10) | `providers.tf`/`versions.tf` (the latter has a partial `backend "s3" {}` block — bucket/key/region supplied at `init` time, since Terraform backend blocks can't contain variables), `variables.tf`, `main.tf` (a single `module "deployment"` call into `modules/workspace-deployment`), `outputs.tf` (forwards). No per-workspace copies of any of this — every workspace uses these exact same files; only the `-var-file` and the backend-config differ per workspace. |
@@ -994,10 +994,37 @@ Priority order agreed on:
     - Remaining items from §5.13, to tackle one at a time per the user's
       explicit instruction: item 2 (resolve `profile.schema.json` — now
       even more out of sync with the shrunk profile shape than before),
-      item 3 (`network.strategy` authority — request vs. profile, flagged
-      again above since trimming profiles made the dead field's removal
-      even more clearly correct), item 4 (merge the five `policies/*.yaml`
-      files into one).
+      item 4 (merge the five `policies/*.yaml` files into one). Item 3
+      (`network.strategy` authority) is done — see milestone 16.
+16. **`network.strategy` given one clear ownership rule — closes item 3
+    of §5.13** (2026-10-14). Milestone 15 already deleted the profile's
+    dead `network.strategy`/`architecture` copy, so the literal
+    duplicate-field problem was gone, but that left a real question open:
+    nothing stopped a request from picking *any* strategy
+    (`policies/network.yaml`'s `custom`/`isolated`) regardless of
+    environment — e.g. a `live` request could ask for `isolated` (a
+    brand-new, Terraform-created VPC) even though §6's decision baseline
+    says live networking is "custom / platform-controlled." Fixed by
+    adding `allowed_strategies` (per environment) to
+    `policies/network.yaml` — `dev`/`stage` allow both `custom` and
+    `isolated`; `live` allows only `custom`. `resolver.py` now validates
+    the request's chosen strategy against this list right after
+    confirming the strategy itself is defined, raising a clear
+    `ValueError` naming what's actually allowed if it isn't. This makes
+    `policies/network.yaml` the single place network-strategy authority
+    lives: the request picks a strategy name, the policy constrains which
+    picks are valid per environment, and nothing else (no profile field)
+    has a competing opinion.
+    - Verified: re-ran `resolver/main.py` for all five existing requests —
+      byte-identical `normalized/*.yaml` output (none of them needed to
+      change, since every existing request's strategy was already
+      allowed for its environment). Confirmed the new check actually
+      blocks something by testing a throwaway `live` request with
+      `network.strategy: isolated` — rejected with "Network strategy
+      'isolated' is not allowed for environment 'live'. Allowed
+      strategies: custom." Regenerated `terraform.tfvars.json` for all
+      three real workspaces afterward — byte-identical, confirming zero
+      effect on anything already deployed.
 
 ## 9. Conventions observed (keep consistent)
 

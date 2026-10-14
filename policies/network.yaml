@@ -10,6 +10,23 @@ network_policy:
   name: standard-network-policy
   version: "1.0"
 
+# Which network.strategy values a request may choose per environment - the
+# single place this is enforced (CLAUDE.md Sec5.13 item 3 / Sec8 milestone
+# 16). The request picks a strategy; this policy is the only thing that
+# constrains which choices are valid for a given environment. Matches the
+# decision baseline in CLAUDE.md Sec6: live stays platform-controlled
+# (custom only - no self-service dedicated VPC in production), dev/stage
+# may use either while "isolated" is proven out (Sec5.6).
+allowed_strategies:
+  dev:
+    - custom
+    - isolated
+  stage:
+    - custom
+    - isolated
+  live:
+    - custom
+
 strategies:
 
   custom:

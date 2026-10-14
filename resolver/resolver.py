@@ -134,6 +134,23 @@ def resolve_configuration(
             f"Network strategy '{network_strategy}' is not defined."
         )
 
+    allowed_strategies = network_policy["allowed_strategies"].get(
+        environment
+    )
+
+    if allowed_strategies is None:
+        raise ValueError(
+            f"No allowed network strategies are defined for "
+            f"environment '{environment}' in policies/network.yaml."
+        )
+
+    if network_strategy not in allowed_strategies:
+        raise ValueError(
+            f"Network strategy '{network_strategy}' is not allowed for "
+            f"environment '{environment}'. Allowed strategies: "
+            f"{', '.join(allowed_strategies)}."
+        )
+
     network_resources = network_strategy_config["resources"]
 
     # ---------------------------------------------------------
