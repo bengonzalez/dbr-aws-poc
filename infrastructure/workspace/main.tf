@@ -28,6 +28,8 @@ module "deployment" {
   vpc_cidr                          = var.vpc_cidr
   existing_security_group_id        = var.existing_security_group_id
   privatelink_enabled_override      = var.privatelink_enabled_override
+  nat_enabled_override              = var.nat_enabled_override
+  nat_subnet_cidr                   = var.nat_subnet_cidr
 
   existing_workspace_storage_key_arn   = var.existing_workspace_storage_key_arn
   existing_workspace_storage_key_alias = var.existing_workspace_storage_key_alias

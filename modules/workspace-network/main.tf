@@ -3,6 +3,12 @@ locals {
   create_routing        = var.existing_route_table_ids == null
   create_security_group = var.existing_security_group_id == null
 
+  # NAT only applies when this module is creating the VPC itself - see
+  # variables.tf. The private-route half additionally needs this module
+  # to own routing too (can't add a route to a foreign route table).
+  build_nat         = var.nat_enabled && local.create_vpc
+  build_nat_routing = local.build_nat && local.create_routing
+
   common_tags = merge(
     var.tags,
     {
@@ -85,6 +91,104 @@ resource "aws_route_table_association" "private" {
 
   subnet_id      = aws_subnet.private[count.index].id
   route_table_id = local.route_table_ids[count.index]
+}
+
+# ---------------------------------------------------------------------------
+# NAT Gateway fallback — a single NAT Gateway (not multi-AZ HA; this is a
+# connectivity fallback for accounts without Databricks PrivateLink, not a
+# production HA redesign), shared by both private route tables. Only built
+# when this module owns the VPC (see locals.build_nat above).
+# ---------------------------------------------------------------------------
+
+resource "aws_internet_gateway" "this" {
+  count = local.build_nat ? 1 : 0
+
+  vpc_id = local.vpc_id
+
+  tags = merge(local.common_tags, {
+    Name = "${var.workspace_name}-igw"
+  })
+}
+
+resource "aws_subnet" "nat" {
+  count = local.build_nat ? 1 : 0
+
+  vpc_id = local.vpc_id
+
+  cidr_block        = var.nat_subnet_cidr
+  availability_zone = var.private_subnets[0].availability_zone
+
+  map_public_ip_on_launch = false
+
+  tags = merge(local.common_tags, {
+    Name = "${var.workspace_name}-nat"
+    Tier = "public"
+  })
+}
+
+resource "aws_eip" "nat" {
+  count = local.build_nat ? 1 : 0
+
+  domain = "vpc"
+
+  tags = merge(local.common_tags, {
+    Name = "${var.workspace_name}-nat"
+  })
+
+  depends_on = [
+    aws_internet_gateway.this
+  ]
+}
+
+resource "aws_nat_gateway" "this" {
+  count = local.build_nat ? 1 : 0
+
+  allocation_id = aws_eip.nat[0].id
+  subnet_id     = aws_subnet.nat[0].id
+
+  tags = merge(local.common_tags, {
+    Name = "${var.workspace_name}-nat"
+  })
+
+  depends_on = [
+    aws_internet_gateway.this
+  ]
+}
+
+resource "aws_route_table" "public" {
+  count = local.build_nat ? 1 : 0
+
+  vpc_id = local.vpc_id
+
+  tags = merge(local.common_tags, {
+    Name = "${var.workspace_name}-public"
+  })
+}
+
+resource "aws_route" "public_igw" {
+  count = local.build_nat ? 1 : 0
+
+  route_table_id         = aws_route_table.public[0].id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.this[0].id
+}
+
+resource "aws_route_table_association" "nat" {
+  count = local.build_nat ? 1 : 0
+
+  subnet_id      = aws_subnet.nat[0].id
+  route_table_id = aws_route_table.public[0].id
+}
+
+# Default route for the private subnets - only when this module also
+# created the route tables they're associated with (can't modify a
+# foreign/existing route table).
+resource "aws_route" "private_nat" {
+  count = local.build_nat_routing ? length(var.private_subnets) : 0
+
+  route_table_id         = aws_route_table.private[count.index].id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.this[0].id
 }
 
 # ---------------------------------------------------------------------------

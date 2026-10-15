@@ -115,10 +115,10 @@ requirements, security controls, Terraform behavior.
 |---|---|---|
 | `workspace-requests/{dev,stage,live}/` | Working | Minimal requester input YAML. One `document-ai` request per env exists as the test case. |
 | `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`, `validate_deployment.py`, `inventory.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `inventory.py` (**new**, §8 milestone 25) holds shared `platform/inventory/aws.yaml` lookups (`resolve_metastore_id()`, `find_primary_network()`, `resolve_platform_network()`) — centralized here, not in `generate_tfvars.py`, specifically to avoid a circular import with `check_cidr_allocations.py`. `generate_tfvars.py` turns normalized + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/<env>/<name>/` (§8 milestone 13); its metastore and VPC/route-table lookups both come from `inventory.py` (§8 milestones 23, 25). `generate_backend_config.py` turns `normalized/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (§8 milestones 14, 25) scans every committed `deployment.yaml` for CIDR collisions/pool violations, now also falling back to `inventory.py`'s lookup when a workspace's `deployment.yaml` omits `platform.vpc_id` entirely; called automatically by `generate_tfvars.py` before it writes tfvars. `validate_deployment.py` (§8 milestones 23-24) checks a *deployed* workspace's live AWS/Databricks state against what was resolved for it — run manually, post-apply, not wired into anything automatically; its optional `--workspace-profile` additionally verifies live catalog isolation/storage via a workspace-scoped profile (§8 milestone 24). See §5 gaps. |
-| `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. `workspace-request.schema.json` gained an optional `governance.catalog_admin_principal` (§8 milestone 22) — the first requester-controlled `governance` field; every other `governance.*` value is policy/profile-derived. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. |
+| `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. `workspace-request.schema.json` gained an optional `governance.catalog_admin_principal` (§8 milestone 22) — the first requester-controlled `governance` field; every other `governance.*` value is policy/profile-derived — and an optional `network.connectivity` (§8 milestone 27, mirrored into `normalized-config.schema.json` too). No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. |
 | `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely — `policies/network.yaml`'s `allowed_strategies` is now the only thing with an opinion on network strategy per environment (§8 milestone 16). |
 | `policies/policies.yaml` | Working | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping + per-environment `allowed_strategies`, validation blocking per env), one key per domain (`network_policy`, `security_policy`, `data_policy`, `governance_policy`, `validation_policy`). Trimmed to only the fields `resolver.py` actually reads (§8 milestone 15), gained `network_policy.allowed_strategies` (§8 milestone 16), then merged from five separate files into this one 2026-10-14 (§8 milestone 18 — closes §5.13's config-layer complexity review). |
-| `platform/inventory/aws.yaml` | Working | Declares the `dev` account's primary network; `vpc.id`/`vpc.cidr` fixed to the real values 2026-10-13 (§8 milestone 14), and now auto-consumed (`vpc.id`/`cidr`, `routing.route_table_ids`) by `generate_tfvars.py`/`check_cidr_allocations.py` via `resolver/inventory.py` (§8 milestone 25) whenever VPC/routing ownership resolves to `"existing"` — `resolver.py` itself still never reads this file's `vpc`/`routing` data, only the subnet `allocation` strategy, by design (see §5.3). Also declares `cidr_pools.isolated_vpc_pool` (§8 milestone 14) and a `databricks.accounts.<id>.regions.<region>.metastore_id` section (§8 milestone 20), auto-consumed the same way. |
+| `platform/inventory/aws.yaml` | Working | Declares the `dev` account's primary network; `vpc.id`/`vpc.cidr` fixed to the real values 2026-10-13 (§8 milestone 14), and now auto-consumed (`vpc.id`/`cidr`, `routing.route_table_ids`) by `generate_tfvars.py`/`check_cidr_allocations.py` via `resolver/inventory.py` (§8 milestone 25) whenever VPC/routing ownership resolves to `"existing"` — `resolver.py` itself still never reads this file's `vpc`/`routing` data, only the subnet `allocation` strategy, by design (see §5.3). Also declares `cidr_pools.isolated_vpc_pool` (§8 milestone 14), a `databricks.accounts.<id>.regions.<region>.metastore_id` section (§8 milestone 20), and a per-account `databricks.accounts.<id>.privatelink_available` fact (§8 milestone 27) — all auto-consumed the same way. |
 | `normalized/*.yaml` | Working — **was silently gitignored, now fixed** | Resolver output per workspace request. `CLAUDE.md` previously (incorrectly) stated these were committed; `.gitignore` actually had a stale `normalized/` rule (its own comment called it "the normalized **virtual environment** directory," which doesn't match what's in there) that had been silently excluding every file in this directory from version control. Removed 2026-10-09 — these now will be tracked going forward. |
 | `infrastructure/workspace/*.tf` | **One shared root for every workspace** (§8 milestone 12 — supersedes the per-directory approach from milestone 10) | `providers.tf`/`versions.tf` (the latter has a partial `backend "s3" {}` block — bucket/key/region supplied at `init` time, since Terraform backend blocks can't contain variables), `variables.tf`, `main.tf` (a single `module "deployment"` call into `modules/workspace-deployment`), `outputs.tf` (forwards). No per-workspace copies of any of this — every workspace uses these exact same files; only the `-var-file` and the backend-config differ per workspace. |
 | `infrastructure/workspace/backend.tfbackend` | **Working** (§8 milestone 13) | Committed, idempotently rewritten every time `generate_backend_config.py` runs for *any* workspace: `bucket`/`region`/`use_lockfile` — identical for every workspace, so this stays a single shared file instead of being repeated in each per-workspace backend-config file. Never hand-edit. |
@@ -129,7 +129,7 @@ requirements, security controls, Terraform behavior.
 | `infrastructure/application/` | Empty placeholder | Reserved for application-level resources layered on top of a workspace. Not started. |
 | `modules/networking`, `modules/kms`, `modules/security`, `modules/storage`, `modules/endpoints` | POC-era, superseded for the factory | Built for the single-shot POC (`infrastructure/nonprod/poc`). Hardcode `var.project_name`, use a placeholder `ec2.amazonaws.com` trust policy in `security` (explicitly flagged in that file's own comment as provisional), single KMS key, 2-bucket storage. `modules/kms` is superseded by `modules/workspace-kms`, and `modules/endpoints` by `modules/workspace-endpoints`, for the factory path — both POC modules stay only for `infrastructure/nonprod/poc`, don't extend them further. `networking`/`security`/`storage` still need generalized replacements if/when needed. |
 | `modules/workspace-deployment` | **Working** | The composed, real deployment logic: network, endpoints, PrivateLink, IAM role, KMS, credentials/storage/network/workspace registration. Called by the one shared root (above) for every workspace — no longer "called by every new per-workspace directory" now that milestone 10's approach was superseded by milestone 12. Deliberately excludes the old scratch `terraform_data.workspace_configuration` resource (§5.5) — no reason to carry known debt into this module. |
-| `modules/workspace-network`, `modules/workspace-endpoints`, `modules/workspace-privatelink`, `modules/workspace-iam-role`, `modules/workspace-kms` | Working | Factory-style modules composed by `modules/workspace-deployment`. `workspace-network` supports independent existing-or-create per sub-resource (vpc/routing/security-group) — both `custom` and `isolated` strategies are now real, not just modeled in config (§8). `workspace-endpoints` provides the S3 gateway + STS (+ KMS, conditionally) interface endpoints needed whenever there's no NAT; its interface-endpoint security group ingress is scoped to the workspace compute security group (not a CIDR) — matches the SRA reference's approach (§7/§8). `workspace-privatelink` (**new**) registers the two Databricks PrivateLink endpoints (REST API + SCC relay) and private access settings so classic compute can reach the control plane with no NAT — see §7/§8. `workspace-iam-role` uses proper Databricks cross-account trust + restricted policy. `workspace-kms` provisions the customer-managed workspace-storage + managed-services keys, gated on `encryption.workspace == "customer_managed"`, with optional bring-your-own-existing-key inputs per key (§8). |
+| `modules/workspace-network`, `modules/workspace-endpoints`, `modules/workspace-privatelink`, `modules/workspace-iam-role`, `modules/workspace-kms` | Working | Factory-style modules composed by `modules/workspace-deployment`. `workspace-network` supports independent existing-or-create per sub-resource (vpc/routing/security-group) — both `custom` and `isolated` strategies are now real, not just modeled in config (§8) — and, as of 2026-10-15 (§8 milestone 27), an optional single-NAT-Gateway fallback (IGW, public subnet, EIP, NAT Gateway, default routes on the private route tables) gated on `nat_enabled && create_vpc`, for workspaces without Databricks PrivateLink available. `workspace-endpoints` provides the S3 gateway + STS (+ KMS, conditionally) interface endpoints needed whenever there's no NAT; its interface-endpoint security group ingress is scoped to the workspace compute security group (not a CIDR) — matches the SRA reference's approach (§7/§8); built regardless of whether NAT is also enabled (reduces NAT data-transfer cost either way). `workspace-privatelink` registers the two Databricks PrivateLink endpoints (REST API + SCC relay) and private access settings so classic compute can reach the control plane with no NAT — see §7/§8; requires Enterprise tier, see `network.connectivity` (§8 milestone 27) for the now-automatic NAT fallback when it isn't available. `workspace-iam-role` uses proper Databricks cross-account trust + restricted policy. `workspace-kms` provisions the customer-managed workspace-storage + managed-services keys, gated on `encryption.workspace == "customer_managed"`, with optional bring-your-own-existing-key inputs per key (§8). |
 | `modules/unity-catalog-data/`, `modules/unity-catalog-workspace/` | **Working, real-apply-verified** (§8 milestones 19, 21, 23) | `unity-catalog-data`: dedicated S3 bucket for UC managed storage, optional customer-managed KMS key (gated on `encryption.application_data`), the UC IAM role/policy chain (via `databricks_aws_unity_catalog_assume_role_policy`/`_policy` data sources, bootstrapped SRA-style to avoid the storage-credential/role circular dependency), a `time_sleep` for IAM propagation, storage credential (with an explicit `metastore_id` — required for account-level providers, §8 milestone 23), external location, and explicit `databricks_workspace_binding` resources for both the credential and external location (neither auto-binds to its creating workspace the way `databricks_catalog` does — found via a real apply, §8 milestone 23). `unity-catalog-workspace`: metastore assignment (to an existing, platform-owned metastore — not created here) + a dedicated, always-isolated catalog per workspace + default namespace setting + optional `databricks_grants` (§8 milestone 21). Both composed into `modules/workspace-deployment`, gated on `governance.unity_catalog`, called *after* `databricks_mws_workspaces.this` (every UC resource that needs a real workspace ID uses `provider_config { workspace_id }` against the existing account-console provider — no second workspace-scoped provider needed). Real-apply-verified against `isolated-proof` (§8 milestone 23), not just `terraform plan`. |
 | `modules/databricks-account/`, `modules/databricks-workspace/` | **Empty — not started, scope clarified** | Reserved for genuinely account-wide/workspace-hardening SRA features not yet requested (legacy feature disabling, compliance security profile, enhanced security monitoring, audit log delivery, user assignment, network policy) — **not** Unity Catalog, which went into the two `unity-catalog-*` modules above instead (§8 milestone 19 resolves an ambiguity that existed in §7's own notes about where UC code should live). |
 | `resolver/__pycache__` | n/a | Build artifact, should be gitignored if not already. |
@@ -344,17 +344,7 @@ is to set `endpoints_ownership_override = "terraform"` for dev specifically
     off per-workspace so the generic AWS service endpoints (S3/STS/KMS)
     still get built on non-Enterprise accounts. Both proof workspaces (§4a)
     set `overrides.privatelink_enabled: false` in their `deployment.yaml`.
-    **TODO, explicitly requested by the user: add NAT as a selectable
-    fallback for full control-plane connectivity on accounts where
-    PrivateLink isn't available** (the original POC used NAT; it was
-    deliberately left out when PrivateLink was built, on the assumption
-    PrivateLink would always be used instead — that assumption turned out
-    to be wrong for non-Enterprise accounts). Shape: likely another
-    override toggle (e.g. `nat_enabled_override`) alongside
-    `privatelink_enabled_override`, adding a NAT Gateway + EIP + public
-    subnet + IGW to `modules/workspace-network` when selected, gated the
-    same way as everything else in this ownership-override system. Not
-    started.
+    **NAT fallback built — done, see §8 milestone 27.**
 12. **No CIDR allocation or collision tracking across workspaces — fixed,
     see §8 milestone 14.** Every concrete CIDR value (`network.vpc_cidr`
     and each `network.subnets.private[].cidr`) was hand-picked and typed
@@ -1688,6 +1678,96 @@ Priority order agreed on:
       the whole repo returns nothing. Nothing to clean up — just closing
       a gap that had already been resolved without ever being marked
       closed.
+27. **NAT Gateway fallback for non-Enterprise PrivateLink — closes
+    §5.11's long-standing TODO** (2026-10-15). Disabling PrivateLink
+    (`privatelink_enabled_override: false`) used to leave `isolated`-
+    strategy classic compute with no path to the control plane at all
+    beyond the generic S3/STS/KMS endpoints. Built with an explicit
+    design requirement from the user: the connectivity choice must be
+    toggleable from `workspace-requests/*.yaml`, not just a deployment-
+    time override, confirmed via `AskUserQuestion` before implementing.
+    - New optional `network.connectivity` (`privatelink`/`nat`/`auto`,
+      default `auto`) in the request, flowing through `resolver.py` as a
+      plain passthrough into `normalized.network.connectivity` — not
+      resolved against policy there, same treatment as
+      `governance.catalog_admin_principal`. The actual decision (and the
+      "does this account even support it" check) happens in
+      `generate_tfvars.py`, at the point `deployment.yaml` names the
+      real Databricks account — `resolver.py` never knows that account
+      id, by design, same reason `existing_metastore_id` lives there too.
+    - `platform/inventory/aws.yaml` gained a per-Databricks-account
+      `privatelink_available` fact (sibling to `metastore_id`) — both
+      known accounts: `false`, confirmed by the real "Feature cannot be
+      accessed... ENTERPRISE" errors already hit twice (§5.11/§4a).
+      `resolver/inventory.py`'s new `resolve_connectivity()`: `"auto"`
+      picks PrivateLink when available, NAT otherwise; explicit
+      `"privatelink"` against an unsupported account is rejected with a
+      clear error (same pattern as `network.strategy`'s
+      `allowed_strategies` check); explicit `"nat"` always gets NAT.
+    - **Real gap caught by testing against a live workspace, not just
+      `terraform plan` of something never applied**: the plan for this
+      milestone originally gated the NAT resolution in
+      `generate_tfvars.py` on `endpoints_ownership == "terraform"` alone
+      (mirroring PrivateLink's own gate). Running it for real against
+      `client-vpc-proof` (which has `endpoints_ownership: terraform` via
+      override, but `vpc_ownership: existing` — a client-provided VPC)
+      immediately failed, demanding a `network.nat_subnet_cidr` that
+      made no sense for a VPC this factory doesn't own. Fixed by gating
+      NAT independently on `vpc_ownership == "terraform"` instead —
+      PrivateLink's AWS-side resources are purely additive (safe
+      whenever Terraform owns the *endpoints*, regardless of who owns
+      the VPC), but NAT attaches an Internet Gateway to the *whole VPC*
+      and modifies *existing* private route tables, which isn't this
+      factory's call to make on a VPC it doesn't own. Both gates are
+      now independent and correctly different, matching this milestone's
+      own "Scope boundary" reasoning that the first implementation pass
+      had briefly contradicted.
+    - `modules/workspace-network` gained the actual NAT resources — one
+      NAT Gateway (not multi-AZ HA; a connectivity fallback, not a
+      production redesign), gated on a new `nat_enabled` + `local.build_nat`
+      (`nat_enabled && create_vpc`): `aws_internet_gateway`, one public
+      `aws_subnet` (same AZ as the first private subnet - no new AZ
+      input needed), `aws_eip`, `aws_nat_gateway`, a public
+      `aws_route_table` + IGW route + association, and a default route
+      added to *each* already-created private route table (additionally
+      gated on `create_routing`, since a foreign/existing route table
+      can't safely be modified). No security-group change needed — the
+      workspace SG's egress rule already allows all outbound traffic
+      unconditionally.
+    - `network.nat_subnet_cidr` (new, in `deployment.yaml`, same shape
+      as the private subnet CIDRs) is required whenever NAT resolves
+      enabled; `resolver/check_cidr_allocations.py` now includes it in
+      the same containment/collision checks private subnets already get.
+    - Threaded `nat_enabled_override`/`nat_subnet_cidr` through
+      `modules/workspace-deployment` → `infrastructure/workspace`,
+      exactly like `privatelink_enabled_override`.
+    - `isolated-proof`'s `deployment.yaml` had its now-redundant
+      `overrides.privatelink_enabled: false` removed (the `"auto"`
+      default already resolves this correctly) and gained the required
+      `network.nat_subnet_cidr: 10.70.2.0/24` — the first deployment
+      file to actually need it.
+    - Verified end to end: regenerated tfvars for all three real
+      workspaces — `document-ai-dev` unaffected (no connectivity fields
+      at all, matching its `custom`/fully-existing-everything shape),
+      `client-vpc-proof` keeps only `privatelink_enabled_override: false`
+      (no NAT, correctly, per the gate fix above), `isolated-proof` gets
+      `privatelink_enabled_override: false` +
+      `nat_enabled_override: true` + `nat_subnet_cidr`. `terraform plan`
+      against the **live** `isolated-proof` workspace showed exactly the
+      9 expected new resources (1 IGW, 1 public subnet, 1 EIP, 1 NAT
+      Gateway, 1 public route table + route + association, 2 private
+      default routes) with no errors and nothing else disturbed — the
+      free, real test this milestone's plan called for, made possible
+      by `isolated-proof` already being live from the validation-harness
+      milestone. `document-ai-dev`/`client-vpc-proof` plans re-verified
+      unchanged (30/35 resources, same as before this milestone).
+      Confirmed the rejection path (explicit `"privatelink"` against an
+      unsupported account) and the explicit `"nat"` override path via
+      throwaway tests, both cleaned up afterward.
+    - **Real `terraform apply` of the NAT resources against
+      `isolated-proof` remains a separate, explicit go/no-go** — a NAT
+      Gateway has a real ongoing AWS hourly cost, not assumed as part of
+      this change.
 
 ## 9. Conventions observed (keep consistent)
 

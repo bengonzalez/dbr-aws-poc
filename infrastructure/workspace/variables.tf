@@ -133,6 +133,18 @@ variable "privatelink_enabled_override" {
   default     = null
 }
 
+variable "nat_enabled_override" {
+  description = "Override whether a NAT Gateway fallback is built, independent of privatelink_enabled_override. Null defers to the default (off). Only takes effect when VPC ownership resolves to 'terraform'."
+  type        = bool
+  default     = null
+}
+
+variable "nat_subnet_cidr" {
+  description = "CIDR block for the NAT Gateway's public subnet. Required when nat_enabled_override is true and VPC ownership resolves to 'terraform'."
+  type        = string
+  default     = null
+}
+
 variable "existing_workspace_storage_key_arn" {
   description = "ARN of an existing KMS key to use for workspace storage instead of creating a dedicated one."
   type        = string

@@ -16,6 +16,7 @@ ownership:
 network:
   strategy: custom
   architecture: hybrid
+  connectivity: auto
   requirements:
     vpc:
       ownership: existing

@@ -16,6 +16,7 @@ ownership:
 network:
   strategy: isolated
   architecture: platform_managed
+  connectivity: auto
   requirements:
     vpc:
       ownership: terraform

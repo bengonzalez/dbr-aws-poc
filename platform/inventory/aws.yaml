@@ -34,14 +34,25 @@ cidr_pools:
 # a workspace only needs its own deployment.yaml entry
 # (unity_catalog.existing_metastore_id) to override this default, not to
 # supply it every time. See CLAUDE.md §5.3/§8 milestone 20.
+#
+# privatelink_available (sibling to metastore_id, per account - not per
+# region, since it's an account pricing-tier fact): whether this
+# Databricks account has Enterprise tier, required for
+# modules/workspace-privatelink. Both known accounts: false, confirmed
+# by real "Feature cannot be accessed... ENTERPRISE" errors hit twice
+# (CLAUDE.md §5.11). Drives network.connectivity's "auto" default
+# (resolver/inventory.py's resolve_connectivity(), §8 milestone 27) -
+# NAT whenever PrivateLink isn't available, not a silent connectivity gap.
 databricks:
   accounts:
     "331f8702-2e00-42e9-82e2-2935e7e1d4f9":
+      privatelink_available: false
       regions:
         us-east-1:
           metastore_id: "1361f3a1-e668-4807-89ee-1936b7a877fb"
 
     "eddbb85f-6b3c-4261-8ca2-0d9d62575ce2":
+      privatelink_available: false
       regions:
         us-east-1:
           metastore_id: "0745ece3-cb83-4a7f-9dc5-dc1716c015c7"

@@ -228,10 +228,19 @@ Run these from the repository root unless noted otherwise.
   not a real error — a plain retry a few seconds to minutes later typically
   succeeds. See `CLAUDE.md` for details.
 - **Databricks PrivateLink (`modules/workspace-privatelink`) requires an
-  Enterprise-tier Databricks account.** On any other tier, set
-  `overrides.privatelink_enabled: false` in the workspace's
-  `deployment.yaml` — the generic AWS service endpoints still get built,
-  just not PrivateLink itself.
+  Enterprise-tier Databricks account.** You don't normally need to do
+  anything about this: a request's `network.connectivity` defaults to
+  `"auto"`, which automatically falls back to a NAT Gateway whenever the
+  target Databricks account doesn't have PrivateLink available
+  (`platform/inventory/aws.yaml`'s `privatelink_available` per account —
+  update it there if a new account's tier status is ever wrong). Set
+  `network.connectivity: "nat"` or `"privatelink"` explicitly in the
+  request to force one or the other; an explicit `"privatelink"` against
+  an account without it is rejected with a clear error. NAT only applies
+  to `isolated`-strategy workspaces (Terraform creates the VPC) — it
+  also needs a `network.nat_subnet_cidr` in `deployment.yaml`, same shape
+  as the private subnet CIDRs. A NAT Gateway has a real, ongoing AWS
+  hourly cost — review the plan before applying for that reason too.
 - **Manual deployment doesn't scale past a handful of workspaces.** It's
   fine for testing and for standing up the pipeline itself, but the
   per-workspace-backend-selection discipline above depends entirely on

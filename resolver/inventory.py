@@ -153,3 +153,50 @@ def resolve_platform_network(
         platform["route_table_ids"] = route_table_ids
 
     return platform
+
+
+def resolve_connectivity(
+    databricks_account_id: str,
+    inventory: dict,
+    requested: str,
+) -> tuple[bool, bool]:
+    """
+    Resolve how isolated-strategy classic compute reaches the Databricks
+    control plane. `requested` is normalized.network.connectivity
+    ("privatelink"/"nat"/"auto", a plain passthrough from the request -
+    see resolver.py). Returns (privatelink_enabled, nat_enabled).
+
+    `privatelink_available` (platform/inventory/aws.yaml, per Databricks
+    account - an Enterprise-tier pricing fact, not a per-workspace
+    choice) drives the "auto" default: PrivateLink when the account
+    supports it, NAT otherwise - never a silent connectivity gap, which
+    is what disabling PrivateLink used to leave behind (CLAUDE.md §5.11).
+    Defaults to False (no PrivateLink) for an account not listed at all -
+    conservative, since Enterprise tier is opt-in, not assumed.
+    """
+
+    privatelink_available = (
+        inventory.get("databricks", {})
+        .get("accounts", {})
+        .get(databricks_account_id, {})
+        .get("privatelink_available", False)
+    )
+
+    if requested == "privatelink":
+        require(
+            privatelink_available,
+            f"network.connectivity is 'privatelink', but Databricks "
+            f"account '{databricks_account_id}' does not have PrivateLink "
+            f"available (platform/inventory/aws.yaml's "
+            f"'databricks.accounts.<id>.privatelink_available' is false "
+            f"or unset) - it requires Enterprise tier. Choose 'nat' or "
+            f"'auto' in the workspace request instead.",
+        )
+
+        return True, False
+
+    if requested == "nat":
+        return False, True
+
+    # "auto" (the default)
+    return privatelink_available, not privatelink_available

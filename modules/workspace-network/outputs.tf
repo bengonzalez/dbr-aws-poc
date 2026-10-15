@@ -25,3 +25,8 @@ output "security_group_id" {
     aws_security_group.workspace[0].id : data.aws_security_group.existing[0].id
   )
 }
+
+output "nat_gateway_id" {
+  description = "NAT Gateway ID, when built (nat_enabled and this module owns the VPC); null otherwise."
+  value       = local.build_nat ? aws_nat_gateway.this[0].id : null
+}

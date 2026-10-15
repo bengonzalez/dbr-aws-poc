@@ -26,12 +26,17 @@ network:
         availability_zone: us-east-1a
       - cidr: 10.70.1.0/24
         availability_zone: us-east-1b
+  # NAT Gateway's public subnet - required since network.connectivity
+  # resolves to "nat" by default (this workspace's Databricks account has
+  # no PrivateLink/Enterprise tier - platform/inventory/aws.yaml's
+  # 'privatelink_available' says so; see §8 milestone 27). Same AZ as the
+  # first private subnet above - one NAT Gateway, not a multi-AZ HA setup.
+  nat_subnet_cidr: 10.70.2.0/24
 
-overrides:
-  # PrivateLink requires Enterprise tier - confirmed unavailable on both
-  # accounts tried. Generic S3/STS endpoints still get built; NAT is a
-  # possible future fallback for full connectivity - see CLAUDE.md TODO.
-  privatelink_enabled: false
+# No overrides needed: this workspace's request never set
+# network.connectivity, so it defaults to "auto" - which already
+# correctly resolves to NAT (no explicit privatelink_enabled/nat_enabled
+# override needed, unlike before this feature existed).
 
 # The metastore for this workspace's Databricks account (eddbb85f.../TSA)
 # is looked up automatically from platform/inventory/aws.yaml's

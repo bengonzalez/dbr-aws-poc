@@ -55,6 +55,23 @@ variable "existing_security_group_id" {
   default     = null
 }
 
+variable "nat_enabled" {
+  description = "Whether to build a NAT Gateway fallback for full control-plane/internet connectivity (used when Databricks PrivateLink isn't available). Only takes effect when this module is also creating the VPC (existing_vpc_id is null) - attaching an Internet Gateway and modifying route tables for a VPC this factory doesn't own isn't this module's call to make."
+  type        = bool
+  default     = false
+}
+
+variable "nat_subnet_cidr" {
+  description = "CIDR block for the NAT Gateway's public subnet. Required when nat_enabled is true and existing_vpc_id is null."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = !var.nat_enabled || var.existing_vpc_id != null || var.nat_subnet_cidr != null
+    error_message = "nat_subnet_cidr is required when nat_enabled is true and a new VPC is being created."
+  }
+}
+
 variable "tags" {
   description = "Tags for workspace network resources."
   type        = map(string)

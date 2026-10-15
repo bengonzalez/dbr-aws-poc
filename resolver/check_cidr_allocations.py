@@ -156,12 +156,25 @@ def check_all() -> None:
 
             isolated_vpcs.append((workspace_name, vpc_network))
 
-        subnets = deployment.get("network", {}).get("subnets", {}).get("private", [])
+        deployment_network = deployment.get("network", {})
+
+        # nat_subnet_cidr (when present) is just another subnet in the same
+        # VPC - gets the same containment/collision checks as the private
+        # subnets (CLAUDE.md §8 milestone 27).
+        subnet_cidrs = [
+            subnet["cidr"]
+            for subnet in deployment_network.get("subnets", {}).get("private", [])
+        ]
+
+        nat_subnet_cidr = deployment_network.get("nat_subnet_cidr")
+
+        if nat_subnet_cidr is not None:
+            subnet_cidrs.append(nat_subnet_cidr)
 
         existing_vpc_network, existing_subnets = scopes.get(scope_key, (vpc_network, []))
 
-        for subnet in subnets:
-            subnet_network = ipaddress.ip_network(subnet["cidr"])
+        for subnet_cidr in subnet_cidrs:
+            subnet_network = ipaddress.ip_network(subnet_cidr)
 
             if existing_vpc_network is not None and not subnet_network.subnet_of(existing_vpc_network):
                 raise ValueError(

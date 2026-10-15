@@ -12,12 +12,16 @@ module "workspace_network" {
 
   existing_security_group_id = local.security_group_ownership == "existing" ? var.existing_security_group_id : null
 
+  nat_enabled     = local.nat_enabled
+  nat_subnet_cidr = local.nat_enabled ? var.nat_subnet_cidr : null
+
   tags = local.common_tags
 }
 
 # VPC endpoints (S3 gateway + STS, and KMS when a customer-managed key is in
-# use), needed whenever networking has no NAT/IGW — i.e. whenever endpoints
-# ownership resolves to 'terraform' (isolated by default).
+# use), needed whenever endpoints ownership resolves to 'terraform'
+# (isolated by default) - built regardless of whether NAT is also enabled,
+# since they avoid NAT data-transfer costs for S3/STS/KMS traffic either way.
 module "workspace_endpoints" {
   count  = local.endpoints_ownership == "terraform" ? 1 : 0
   source = "../workspace-endpoints"

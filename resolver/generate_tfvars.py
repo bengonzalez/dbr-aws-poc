@@ -4,7 +4,12 @@ import json
 
 from loader import load_yaml
 from check_cidr_allocations import check_all as check_cidr_allocations
-from inventory import require, resolve_metastore_id, resolve_platform_network
+from inventory import (
+    require,
+    resolve_connectivity,
+    resolve_metastore_id,
+    resolve_platform_network,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -66,6 +71,12 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
     requirements["subnets"] = subnets
     network["requirements"] = requirements
 
+    # connectivity (privatelink/nat/auto) is resolved separately below into
+    # privatelink_enabled_override/nat_enabled_override - var.network's
+    # object type doesn't declare it, since it's consumed as its own
+    # standalone variable, not threaded through the network object itself.
+    network.pop("connectivity", None)
+
     tfvars = {
         "databricks_account_id": databricks_account_id,
         "workspace": normalized["workspace"],
@@ -108,6 +119,9 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
     routing_ownership = overrides.get("routing_ownership") or (
         "terraform" if network_strategy == "isolated" else "existing"
     )
+    endpoints_ownership = overrides.get("endpoints_ownership") or (
+        "terraform" if network_strategy == "isolated" else "existing"
+    )
 
     platform = resolve_platform_network(
         normalized["cloud"]["account"],
@@ -131,8 +145,56 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
     if "existing_security_group_id" in overrides:
         tfvars["existing_security_group_id"] = overrides["existing_security_group_id"]
 
-    if "privatelink_enabled" in overrides:
-        tfvars["privatelink_enabled_override"] = overrides["privatelink_enabled"]
+    # Connectivity (PrivateLink vs NAT) only matters when Terraform owns
+    # enough of the networking stack to act on it - and PrivateLink and
+    # NAT have different requirements, so they're gated independently:
+    #   - PrivateLink's AWS-side resources are purely additive (interface
+    #     endpoints + a security group) - safe whenever Terraform owns the
+    #     *endpoints*, same as modules/workspace-privatelink already gates
+    #     on today, regardless of who owns the VPC itself (e.g.
+    #     client-vpc-proof builds its own endpoints inside a
+    #     client-provided VPC).
+    #   - NAT attaches an Internet Gateway to the *whole VPC* and modifies
+    #     the *existing* private route tables - not something to do to a
+    #     VPC this factory doesn't own. Gated on vpc_ownership, not
+    #     endpoints_ownership (deliberately different from PrivateLink
+    #     above - client-vpc-proof has endpoints_ownership "terraform" but
+    #     vpc_ownership "existing", and must NOT get NAT).
+    # deployment.yaml's overrides.privatelink_enabled/nat_enabled (if
+    # explicitly set) win over the request-level network.connectivity
+    # resolution - same override-beats-default precedence as everywhere
+    # else in this pipeline.
+    if endpoints_ownership == "terraform" or vpc_ownership == "terraform":
+        privatelink_enabled, nat_enabled = resolve_connectivity(
+            databricks_account_id,
+            inventory,
+            normalized["network"].get("connectivity", "auto"),
+        )
+
+        if endpoints_ownership == "terraform":
+            tfvars["privatelink_enabled_override"] = overrides.get(
+                "privatelink_enabled", privatelink_enabled
+            )
+        elif "privatelink_enabled" in overrides:
+            tfvars["privatelink_enabled_override"] = overrides["privatelink_enabled"]
+
+        if vpc_ownership == "terraform":
+            nat_enabled = overrides.get("nat_enabled", nat_enabled)
+            tfvars["nat_enabled_override"] = nat_enabled
+
+            if nat_enabled:
+                nat_subnet_cidr = deployment_network.get("nat_subnet_cidr")
+
+                require(
+                    bool(nat_subnet_cidr),
+                    "network.connectivity resolves to NAT, but the "
+                    "deployment file is missing 'network.nat_subnet_cidr' "
+                    "- a concrete CIDR for the NAT Gateway's public "
+                    "subnet, same shape as the private subnet CIDRs "
+                    "above.",
+                )
+
+                tfvars["nat_subnet_cidr"] = nat_subnet_cidr
 
     kms = deployment.get("kms", {})
 

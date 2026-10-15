@@ -320,6 +320,16 @@ def resolve_configuration(
             "strategy": network_strategy,
             "architecture": network_strategy_config["architecture"],
 
+            # Plain passthrough, not resolved against any policy - same
+            # treatment as governance.catalog_admin_principal. Which
+            # Databricks account the workspace runs on (needed to check
+            # whether "privatelink" is actually available) isn't known
+            # until deployment.yaml names it, so that check happens in
+            # resolver/generate_tfvars.py, not here.
+            "connectivity": request.get("network", {}).get(
+                "connectivity", "auto"
+            ),
+
             "requirements": {
                 "vpc": {
                     "ownership": network_resources["vpc"]["ownership"],

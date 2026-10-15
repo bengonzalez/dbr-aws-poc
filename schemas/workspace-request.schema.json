@@ -163,6 +163,16 @@
             "custom",
             "isolated"
           ]
+        },
+
+        "connectivity": {
+          "type": "string",
+          "enum": [
+            "privatelink",
+            "nat",
+            "auto"
+          ],
+          "description": "How isolated-strategy classic compute reaches the Databricks control plane. 'privatelink' requires an Enterprise-tier Databricks account (rejected otherwise); 'nat' always builds a NAT Gateway; 'auto' (default if omitted) picks PrivateLink when the target Databricks account supports it, NAT otherwise. Moot for 'custom' strategy workspaces reusing an existing VPC's own connectivity."
         }
       },
 
