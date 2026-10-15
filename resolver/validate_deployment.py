@@ -39,7 +39,7 @@ import json
 import subprocess
 
 from loader import load_yaml
-from generate_tfvars import resolve_metastore_id
+from inventory import resolve_metastore_id
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKSPACE_ROOT = ROOT / "infrastructure" / "workspace"

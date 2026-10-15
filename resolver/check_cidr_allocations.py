@@ -19,14 +19,12 @@ from pathlib import Path
 import ipaddress
 
 from loader import load_yaml
+from inventory import find_primary_network
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def _load_pool() -> ipaddress.IPv4Network:
-    inventory_path = ROOT / "platform" / "inventory" / "aws.yaml"
-    inventory = load_yaml(inventory_path)
-
+def _load_pool(inventory: dict) -> ipaddress.IPv4Network:
     pool = inventory.get("cidr_pools", {}).get("isolated_vpc_pool")
 
     if pool is None:
@@ -38,9 +36,11 @@ def _load_pool() -> ipaddress.IPv4Network:
     return ipaddress.ip_network(pool)
 
 
-def _iter_deployments() -> list[tuple[str, dict]]:
-    """Return (workspace_name, deployment_dict) for every committed
-    deployment.yaml under infrastructure/deployments/."""
+def _iter_deployments() -> list[tuple[str, dict, dict]]:
+    """Return (workspace_name, deployment_dict, normalized_dict) for every
+    committed deployment.yaml under infrastructure/deployments/ (paired
+    with its same-named normalized/<workspace>.yaml - the same pairing
+    generate_tfvars.py itself relies on)."""
 
     deployments_root = ROOT / "infrastructure" / "deployments"
 
@@ -48,12 +48,24 @@ def _iter_deployments() -> list[tuple[str, dict]]:
 
     for deployment_path in sorted(deployments_root.glob("*/*/deployment.yaml")):
         workspace_name = deployment_path.parent.name
-        results.append((workspace_name, load_yaml(deployment_path)))
+        normalized_path = ROOT / "normalized" / f"{workspace_name}.yaml"
+        results.append(
+            (
+                workspace_name,
+                load_yaml(deployment_path),
+                load_yaml(normalized_path),
+            )
+        )
 
     return results
 
 
-def _vpc_scope(workspace_name: str, deployment: dict) -> tuple[str, ipaddress.IPv4Network | None]:
+def _vpc_scope(
+    workspace_name: str,
+    deployment: dict,
+    normalized: dict,
+    inventory: dict,
+) -> tuple[str, ipaddress.IPv4Network | None]:
     """
     Return (scope_key, vpc_network_or_None) for a workspace.
 
@@ -73,6 +85,17 @@ def _vpc_scope(workspace_name: str, deployment: dict) -> tuple[str, ipaddress.IP
     if vpc_cidr is not None:
         return (f"isolated:{workspace_name}", ipaddress.ip_network(vpc_cidr))
 
+    if vpc_id is None:
+        # Not in deployment.yaml - fall back to the account/region's known
+        # primary network, the same auto-lookup generate_tfvars.py uses for
+        # the actual Terraform var (CLAUDE.md Sec5.3/Sec8).
+        primary = find_primary_network(
+            normalized["cloud"]["account"], normalized["cloud"]["region"], inventory
+        )
+
+        vpc_id = primary.get("vpc", {}).get("id")
+        existing_vpc_cidr = existing_vpc_cidr or primary.get("vpc", {}).get("cidr")
+
     if vpc_id is not None:
         vpc_network = (
             ipaddress.ip_network(existing_vpc_cidr)
@@ -84,8 +107,9 @@ def _vpc_scope(workspace_name: str, deployment: dict) -> tuple[str, ipaddress.IP
 
     raise ValueError(
         f"Workspace '{workspace_name}' deployment.yaml defines neither "
-        f"network.vpc_cidr (isolated) nor platform.vpc_id (existing) - "
-        f"cannot determine its VPC."
+        f"network.vpc_cidr (isolated) nor platform.vpc_id (existing), and "
+        f"no primary network is known in platform/inventory/aws.yaml for "
+        f"its AWS account/region - cannot determine its VPC."
     )
 
 
@@ -93,7 +117,10 @@ def check_all() -> None:
     """Check every committed deployment.yaml. Raises ValueError on the
     first collision or containment violation found."""
 
-    pool = _load_pool()
+    inventory_path = ROOT / "platform" / "inventory" / "aws.yaml"
+    inventory = load_yaml(inventory_path)
+
+    pool = _load_pool(inventory)
 
     deployments = _iter_deployments()
 
@@ -105,8 +132,10 @@ def check_all() -> None:
     # still required to be globally unique - see platform/inventory/aws.yaml).
     isolated_vpcs: list[tuple[str, ipaddress.IPv4Network]] = []
 
-    for workspace_name, deployment in deployments:
-        scope_key, vpc_network = _vpc_scope(workspace_name, deployment)
+    for workspace_name, deployment, normalized in deployments:
+        scope_key, vpc_network = _vpc_scope(
+            workspace_name, deployment, normalized, inventory
+        )
 
         if scope_key.startswith("isolated:") and vpc_network is not None:
             if not vpc_network.subnet_of(pool):

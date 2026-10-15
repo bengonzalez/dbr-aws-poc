@@ -4,6 +4,7 @@ import json
 
 from loader import load_yaml
 from check_cidr_allocations import check_all as check_cidr_allocations
+from inventory import require, resolve_metastore_id, resolve_platform_network
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -20,63 +21,6 @@ KMS_PASSTHROUGH_KEYS = (
     "existing_managed_services_key_arn",
     "existing_managed_services_key_alias",
 )
-
-
-def require(condition: bool, message: str) -> None:
-    """Raise ValueError with `message` when `condition` is false."""
-
-    if not condition:
-        raise ValueError(message)
-
-
-def resolve_metastore_id(
-    databricks_account_id: str,
-    region: str,
-    deployment: dict,
-    inventory: dict,
-) -> str:
-    """
-    Resolve which Unity Catalog metastore a workspace should be assigned
-    to: known existing metastores (one per Databricks account/region)
-    live in platform/inventory/aws.yaml's 'databricks' section, looked up
-    automatically so a workspace's deployment.yaml only needs to name its
-    Databricks account, not repeat the metastore id every time.
-    'unity_catalog.existing_metastore_id' in deployment.yaml is an
-    optional override for the rare workspace that needs a different
-    metastore. Raises ValueError if neither source has a value.
-
-    Shared by generate_tfvars.py (to produce existing_metastore_id) and
-    validate_deployment.py (to compute the expected value to check a live
-    metastore assignment against) - keeping one source of truth instead
-    of two drifting copies of this lookup.
-    """
-
-    inventory_metastore_id = (
-        inventory.get("databricks", {})
-        .get("accounts", {})
-        .get(databricks_account_id, {})
-        .get("regions", {})
-        .get(region, {})
-        .get("metastore_id")
-    )
-
-    override_metastore_id = deployment.get("unity_catalog", {}).get(
-        "existing_metastore_id"
-    )
-
-    existing_metastore_id = override_metastore_id or inventory_metastore_id
-
-    require(
-        bool(existing_metastore_id),
-        f"governance.unity_catalog is true, but no metastore is known "
-        f"for Databricks account '{databricks_account_id}' region "
-        f"'{region}'. Add it to platform/inventory/aws.yaml's "
-        f"'databricks.accounts' section, or set "
-        f"'unity_catalog.existing_metastore_id' explicitly in this "
-        f"workspace's deployment file to override.",
-    )
-
-    return existing_metastore_id
 
 
 def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
@@ -150,21 +94,35 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
         "tags": normalized.get("tags", {}),
     }
 
-    platform = deployment.get("platform")
+    overrides = deployment.get("overrides", {})
+
+    # Mirrors the coalesce() logic in modules/workspace-deployment/locals.tf
+    # (override, falling back to the strategy's default) - needed here only
+    # to know whether platform.vpc_id/route_table_ids are actually required,
+    # not to decide any Terraform behavior itself.
+    network_strategy = normalized["network"]["strategy"]
+
+    vpc_ownership = overrides.get("vpc_ownership") or (
+        "terraform" if network_strategy == "isolated" else "existing"
+    )
+    routing_ownership = overrides.get("routing_ownership") or (
+        "terraform" if network_strategy == "isolated" else "existing"
+    )
+
+    platform = resolve_platform_network(
+        normalized["cloud"]["account"],
+        normalized["cloud"]["region"],
+        deployment,
+        inventory,
+        need_vpc=vpc_ownership == "existing",
+        need_routing=routing_ownership == "existing",
+    )
 
     if platform:
-        # vpc_cidr (when present) is informational only, for
-        # check_cidr_allocations.py's containment check against an existing
-        # VPC - var.platform's object type doesn't declare it and Terraform
-        # doesn't need it (the VPC already exists), so it's excluded here.
-        tfvars["platform"] = {
-            key: value for key, value in platform.items() if key != "vpc_cidr"
-        }
+        tfvars["platform"] = platform
 
     if vpc_cidr is not None:
         tfvars["vpc_cidr"] = vpc_cidr
-
-    overrides = deployment.get("overrides", {})
 
     for key in OVERRIDE_OWNERSHIP_KEYS:
         if key in overrides:

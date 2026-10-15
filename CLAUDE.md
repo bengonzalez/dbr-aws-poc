@@ -114,11 +114,11 @@ requirements, security controls, Terraform behavior.
 | Path | Status | Notes |
 |---|---|---|
 | `workspace-requests/{dev,stage,live}/` | Working | Minimal requester input YAML. One `document-ai` request per env exists as the test case. |
-| `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`, `validate_deployment.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `generate_tfvars.py` turns that + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/<env>/<name>/` (§8 milestone 13); its metastore-lookup logic is factored into a shared `resolve_metastore_id()` function (§8 milestone 23). `generate_backend_config.py` turns `normalized/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (§8 milestone 14) scans every committed `deployment.yaml` for CIDR collisions/pool violations; called automatically by `generate_tfvars.py` before it writes tfvars. `validate_deployment.py` (§8 milestones 23-24) checks a *deployed* workspace's live AWS/Databricks state against what was resolved for it — run manually, post-apply, not wired into anything automatically; its optional `--workspace-profile` additionally verifies live catalog isolation/storage via a workspace-scoped profile (§8 milestone 24). See §5 gaps. |
+| `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`, `validate_deployment.py`, `inventory.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `inventory.py` (**new**, §8 milestone 25) holds shared `platform/inventory/aws.yaml` lookups (`resolve_metastore_id()`, `find_primary_network()`, `resolve_platform_network()`) — centralized here, not in `generate_tfvars.py`, specifically to avoid a circular import with `check_cidr_allocations.py`. `generate_tfvars.py` turns normalized + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/<env>/<name>/` (§8 milestone 13); its metastore and VPC/route-table lookups both come from `inventory.py` (§8 milestones 23, 25). `generate_backend_config.py` turns `normalized/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (§8 milestones 14, 25) scans every committed `deployment.yaml` for CIDR collisions/pool violations, now also falling back to `inventory.py`'s lookup when a workspace's `deployment.yaml` omits `platform.vpc_id` entirely; called automatically by `generate_tfvars.py` before it writes tfvars. `validate_deployment.py` (§8 milestones 23-24) checks a *deployed* workspace's live AWS/Databricks state against what was resolved for it — run manually, post-apply, not wired into anything automatically; its optional `--workspace-profile` additionally verifies live catalog isolation/storage via a workspace-scoped profile (§8 milestone 24). See §5 gaps. |
 | `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. `workspace-request.schema.json` gained an optional `governance.catalog_admin_principal` (§8 milestone 22) — the first requester-controlled `governance` field; every other `governance.*` value is policy/profile-derived. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. |
 | `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely — `policies/network.yaml`'s `allowed_strategies` is now the only thing with an opinion on network strategy per environment (§8 milestone 16). |
 | `policies/policies.yaml` | Working | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping + per-environment `allowed_strategies`, validation blocking per env), one key per domain (`network_policy`, `security_policy`, `data_policy`, `governance_policy`, `validation_policy`). Trimmed to only the fields `resolver.py` actually reads (§8 milestone 15), gained `network_policy.allowed_strategies` (§8 milestone 16), then merged from five separate files into this one 2026-10-14 (§8 milestone 18 — closes §5.13's config-layer complexity review). |
-| `platform/inventory/aws.yaml` | Working, partially stale | Declares the `dev` account's primary network; `vpc.id`/`vpc.cidr` were fixed to the real values 2026-10-13 (§8 milestone 14). The actual VPC id used by Terraform still comes from `infrastructure/deployments/<env>/<name>/deployment.yaml`, not this file — the resolver never reads `vpc.id`/`vpc.cidr` from here, only the subnet `allocation` strategy (this half of §5.3 is still open). Also declares `cidr_pools.isolated_vpc_pool` (§8 milestone 14) and, as of 2026-10-14, a `databricks.accounts.<id>.regions.<region>.metastore_id` section (§8 milestone 20) — the latter **is** actually auto-consumed, by `generate_tfvars.py` (not the resolver), closing this gap's metastore-id slice while the VPC-id slice remains open. |
+| `platform/inventory/aws.yaml` | Working | Declares the `dev` account's primary network; `vpc.id`/`vpc.cidr` fixed to the real values 2026-10-13 (§8 milestone 14), and now auto-consumed (`vpc.id`/`cidr`, `routing.route_table_ids`) by `generate_tfvars.py`/`check_cidr_allocations.py` via `resolver/inventory.py` (§8 milestone 25) whenever VPC/routing ownership resolves to `"existing"` — `resolver.py` itself still never reads this file's `vpc`/`routing` data, only the subnet `allocation` strategy, by design (see §5.3). Also declares `cidr_pools.isolated_vpc_pool` (§8 milestone 14) and a `databricks.accounts.<id>.regions.<region>.metastore_id` section (§8 milestone 20), auto-consumed the same way. |
 | `normalized/*.yaml` | Working — **was silently gitignored, now fixed** | Resolver output per workspace request. `CLAUDE.md` previously (incorrectly) stated these were committed; `.gitignore` actually had a stale `normalized/` rule (its own comment called it "the normalized **virtual environment** directory," which doesn't match what's in there) that had been silently excluding every file in this directory from version control. Removed 2026-10-09 — these now will be tracked going forward. |
 | `infrastructure/workspace/*.tf` | **One shared root for every workspace** (§8 milestone 12 — supersedes the per-directory approach from milestone 10) | `providers.tf`/`versions.tf` (the latter has a partial `backend "s3" {}` block — bucket/key/region supplied at `init` time, since Terraform backend blocks can't contain variables), `variables.tf`, `main.tf` (a single `module "deployment"` call into `modules/workspace-deployment`), `outputs.tf` (forwards). No per-workspace copies of any of this — every workspace uses these exact same files; only the `-var-file` and the backend-config differ per workspace. |
 | `infrastructure/workspace/backend.tfbackend` | **Working** (§8 milestone 13) | Committed, idempotently rewritten every time `generate_backend_config.py` runs for *any* workspace: `bucket`/`region`/`use_lockfile` — identical for every workspace, so this stays a single shared file instead of being repeated in each per-workspace backend-config file. Never hand-edit. |
@@ -249,24 +249,21 @@ is to set `endpoints_ownership_override = "terraform"` for dev specifically
    profile entirely, rather than trying to fix the enum — the resolver is
    the real source of truth for architecture, so the profile never needed
    its own copy.
-3. **`platform/inventory/aws.yaml` VPC id is a stale placeholder** (`vpc-PLACEHOLDER`)
-   even though the real VPC (`vpc-60c2a81d`) has been known since the POC. The
-   resolver reads this file for subnet-allocation validation but the normalized
-   output has no `platform` block at all — `var.platform.vpc_id` /
-   `var.platform.route_table_ids` in `infrastructure/workspace` are supplied
-   directly via `dev.tfvars`, completely bypassing the inventory file. Fix the
-   placeholder and decide whether the resolver should start emitting a
-   `platform` block into the normalized config so this stops being hand-maintained.
-   **Partial precedent for the fix (2026-10-14, §8 milestone 20)**: the
-   same "known in inventory but still hand-retyped per workspace" problem
-   was just fixed for Unity Catalog metastore ids — not in the resolver,
-   but in `generate_tfvars.py`, which now looks the value up from
-   `platform/inventory/aws.yaml` directly using `deployment.yaml`'s
-   `databricks.account_id`. The VPC id could follow the same shape
-   (inventory lookup in `generate_tfvars.py`, keyed by AWS account id +
-   region, with `deployment.yaml`'s `platform.vpc_id` becoming an optional
-   override) without needing to resolve the bigger "should the resolver
-   itself emit a `platform` block" question at all.
+3. **`platform/inventory/aws.yaml` VPC id was a stale placeholder — the
+   auto-lookup half is now done (§8 milestone 25), the "should the
+   resolver emit a `platform` block" half remains open by design.**
+   `vpc.id`/`cidr`/`routing.route_table_ids` are now looked up
+   automatically by `generate_tfvars.py` (and `check_cidr_allocations.py`)
+   whenever VPC/routing ownership resolves to `"existing"`, the same
+   shape as the Unity Catalog metastore lookup (milestone 20) — see
+   milestone 25 for the full implementation. `resolver.py` itself is
+   still untouched and still doesn't emit a `platform` block into
+   `normalized/*.yaml` — deliberately: the auto-lookup lives in
+   `generate_tfvars.py` precisely *because* it keeps `resolver.py`/the
+   normalized-config schema free of concrete AWS resource ids, matching
+   the existing "resolver resolves policy, deployment-layer resolves
+   concrete ids" boundary. Revisit only if a real need arises for the
+   normalized contract itself to carry a resolved VPC id (none has yet).
 4. **No normalized-YAML → tfvars generator — done, see §8.** `resolver/
    generate_tfvars.py` now does this. `infrastructure/workspace/dev.tfvars`
    (hand-written, HCL) is superseded by the generated
@@ -1611,6 +1608,63 @@ Priority order agreed on:
       `SKIPPED`, no crash) still works alongside the pre-existing
       `FAIL` checks for a non-deployed workspace. `terraform fmt`/
       `validate`/`check_cidr_allocations.py` all clean throughout.
+25. **VPC id/route table auto-lookup from `platform/inventory/aws.yaml`
+    — closes the remaining half of §5.3** (2026-10-14, same day). Same
+    shape as the metastore_id fix (milestone 20): `platform.vpc_id`/
+    `route_table_ids` were already known in `platform/inventory/aws.yaml`
+    (keyed by *AWS* account id/region this time, not Databricks account)
+    but still hand-retyped into every workspace's `deployment.yaml`.
+    - **Real complication the metastore fix didn't have**:
+      `resolver/check_cidr_allocations.py` also reads `deployment.yaml`'s
+      `platform.vpc_id`/`vpc_cidr` directly, to group subnets by VPC and
+      check containment — removing those fields from `deployment.yaml`
+      would have broken it for any workspace relying on the auto-lookup.
+      Fixed by giving the checker the same inventory fallback, which
+      meant it also needed each workspace's `normalized/<name>.yaml`
+      (for `cloud.account`/`cloud.region`) — `_iter_deployments()` now
+      loads both files per workspace, paired by name (the same pairing
+      `generate_tfvars.py` already relies on).
+    - **New shared module `resolver/inventory.py`**, holding `require()`,
+      `resolve_metastore_id()` (moved from `generate_tfvars.py`),
+      `find_primary_network()`, and the new `resolve_platform_network()`.
+      Needed specifically to avoid a circular import:
+      `generate_tfvars.py` already imports `check_cidr_allocations.py`
+      to run it before writing tfvars, so `check_cidr_allocations.py`
+      can't import anything back from `generate_tfvars.py` —
+      `validate_deployment.py`'s import of `resolve_metastore_id` was
+      updated to come from `inventory.py` too, for the same reason.
+    - `resolve_platform_network()` takes `need_vpc`/`need_routing` flags
+      (computed by replicating `modules/workspace-deployment/locals.tf`'s
+      `coalesce()` logic in Python — the override, falling back to the
+      strategy default — needed only to know whether `platform.vpc_id`/
+      `route_table_ids` are actually required this time, not to decide
+      any Terraform behavior). Returns only the keys actually needed,
+      directly usable as the Terraform `platform` variable.
+      `deployment.yaml`'s own `platform` block remains an optional
+      override, same precedence as the metastore fix — for a workspace
+      reusing a *different* existing VPC than the account's primary one
+      (e.g. `client-vpc-proof`'s bare client-provided VPC, which keeps
+      its explicit override unchanged).
+    - `platform/inventory/aws.yaml`'s primary network gained
+      `routing.route_table_ids` (previously only declared `ownership`,
+      no actual ids — a gap on the inventory side, not just the
+      deployment-file side).
+    - `document-ai-dev`'s `deployment.yaml` had its entire `platform:`
+      block removed (replaced with a commented example) to prove the
+      auto-lookup actually does the work, not just coexist unused next
+      to a value that was there anyway — same proof pattern as milestone
+      20's metastore fix.
+    - Verified: regenerated `terraform.tfvars.json` for all three real
+      workspaces — byte-identical both before and after removing
+      `document-ai-dev`'s `platform:` block. `check_cidr_allocations.py`
+      clean throughout. `terraform plan` unchanged for all three
+      (including a zero-resource-change refresh plan for the live
+      `isolated-proof`, confirming the refactor didn't disturb anything
+      already applied). Confirmed the rejection path: a throwaway
+      workspace on an AWS account absent from inventory, with no
+      override, fails clearly (caught by `check_cidr_allocations.py`,
+      which runs first in the pipeline - the same root cause
+      `resolve_platform_network()`'s own check would catch if reached).
 
 ## 9. Conventions observed (keep consistent)
 

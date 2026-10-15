@@ -64,6 +64,12 @@ aws:
             primary:
               name: databricks-dev
 
+              # id/cidr looked up automatically by resolver/generate_tfvars.py
+              # (and resolver/check_cidr_allocations.py) whenever VPC
+              # ownership resolves to "existing" - a workspace's own
+              # deployment.yaml 'platform.vpc_id'/'vpc_cidr' overrides this
+              # default for a workspace reusing a DIFFERENT existing VPC
+              # (e.g. a client-provided one). See CLAUDE.md §5.3/§8.
               vpc:
                 ownership: existing
                 id: vpc-60c2a81d
@@ -85,6 +91,17 @@ aws:
 
               routing:
                 ownership: existing
+
+                # Looked up automatically by resolver/generate_tfvars.py
+                # (and resolver/check_cidr_allocations.py) whenever routing
+                # ownership resolves to "existing" - same auto-lookup
+                # pattern as vpc.id/cidr above and the Unity Catalog
+                # metastore_id below. A workspace's own deployment.yaml
+                # 'platform.route_table_ids' overrides this default for
+                # a workspace reusing different route tables.
+                route_table_ids:
+                  - rtb-042726c440509ac14
+                  - rtb-0e29c295cc93c131c
 
               security_groups:
                 ownership: terraform
