@@ -112,6 +112,14 @@ output "unity_catalog_external_location_name" {
   )
 }
 
+output "unity_catalog_bucket_name" {
+  description = "Name of the S3 bucket backing this workspace's catalog storage root, when governance.unity_catalog is true; null otherwise."
+  value = (
+    var.governance.unity_catalog ?
+    module.unity_catalog_data[0].bucket_name : null
+  )
+}
+
 output "workspace_configuration" {
   description = "Resolved workspace configuration used by the factory."
   value = {

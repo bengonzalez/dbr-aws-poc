@@ -97,3 +97,8 @@ output "unity_catalog_external_location_name" {
   description = "Name of the Unity Catalog external location backing this workspace's catalog, when governance.unity_catalog is true; null otherwise."
   value       = module.deployment.unity_catalog_external_location_name
 }
+
+output "unity_catalog_bucket_name" {
+  description = "Name of the S3 bucket backing this workspace's catalog storage root, when governance.unity_catalog is true; null otherwise."
+  value       = module.deployment.unity_catalog_bucket_name
+}

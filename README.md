@@ -170,12 +170,26 @@ Run these from the repository root unless noted otherwise.
    ```
    Checks the live workspace against what was resolved for it (workspace
    running, network/encryption/Unity Catalog wiring) and reports
-   `PASS`/`FAIL`/`N/A`/`NOT_IMPLEMENTED` per check. Exits non-zero only
-   when a real check fails **and** the environment's
+   `PASS`/`FAIL`/`N/A`/`NOT_IMPLEMENTED`/`SKIPPED` per check. Exits
+   non-zero only when a real check fails **and** the environment's
    `validation.blocking` is true (`dev` is not; `stage`/`live` are).
    `identity.required`/`logging.centralized` always report
    `NOT_IMPLEMENTED` — no SCIM/user provisioning or audit-log-delivery
    Terraform resource exists in this pipeline yet.
+
+   To also verify the catalog's live isolation/storage (not just its
+   metastore assignment), pass a **second, workspace-scoped** profile:
+   ```
+   python resolver/validate_deployment.py --workspace <name> --profile <account-profile> --workspace-profile <workspace-profile>
+   ```
+   Get one with `databricks auth login --host <workspace_url>` (the
+   workspace URL is `terraform output databricks_workspace_url`).
+   **Give it a name different from any account-console profile you
+   already use** — logging in under an *existing* profile name silently
+   repoints that name's host (account-console → that workspace),
+   breaking every account-level command that used to work under it.
+   This bit us once already: re-authenticating fixed it, but it's easy
+   to do by accident since the CLI doesn't warn you.
 
 ## ⚠️ Warnings for manual deployments
 

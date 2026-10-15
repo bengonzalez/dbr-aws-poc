@@ -20,10 +20,16 @@ Each check reports one of:
                     (identity/SCIM provisioning, centralized audit log
                     delivery) - reported honestly rather than silently
                     skipped or faked as a pass.
+  SKIPPED         - the check exists and works, but wasn't given what it
+                    needs this run (currently: governance.unity_catalog.
+                    catalog, which needs a workspace-scoped --workspace-
+                    profile, separate from the account-console --profile
+                    used everywhere else, since `databricks catalogs get`
+                    is a workspace-level API).
 
 Exit code is 0 unless validation.blocking is true AND at least one check
-is FAIL (NOT_IMPLEMENTED/N/A never trigger a non-zero exit) - this is
-what a future CI pipeline would gate on.
+is FAIL (NOT_IMPLEMENTED/N/A/SKIPPED never trigger a non-zero exit) -
+this is what a future CI pipeline would gate on.
 """
 
 from pathlib import Path
@@ -42,6 +48,7 @@ PASS = "PASS"
 FAIL = "FAIL"
 NOT_APPLICABLE = "N/A"
 NOT_IMPLEMENTED = "NOT_IMPLEMENTED"
+SKIPPED = "SKIPPED"
 
 
 class CheckResult:
@@ -114,6 +121,7 @@ def run_checks(
     deployment: dict,
     inventory: dict,
     profile: str,
+    workspace_profile: str | None = None,
 ) -> list[CheckResult]:
     outputs = get_terraform_outputs()
     workspace_id = outputs.get("databricks_workspace_id")
@@ -155,6 +163,13 @@ def run_checks(
             results.append(
                 CheckResult(
                     "governance.unity_catalog", FAIL, "workspace not deployed"
+                )
+            )
+            results.append(
+                check_catalog_contents(
+                    catalog_name=normalized["workspace"]["name"],
+                    expected_bucket_name=expected_bucket_name(normalized),
+                    workspace_profile=workspace_profile,
                 )
             )
 
@@ -264,16 +279,96 @@ def run_checks(
                     "governance.unity_catalog",
                     PASS if actual_metastore_id == expected_metastore_id else FAIL,
                     f"expected={expected_metastore_id!r}, "
-                    f"actual={actual_metastore_id!r}. Note: this only "
-                    "confirms metastore assignment, not live catalog "
-                    "contents/isolation - that needs a workspace-scoped "
-                    "Databricks profile, a scoped-out follow-up.",
+                    f"actual={actual_metastore_id!r}",
                 )
             )
+
+        results.append(
+            check_catalog_contents(
+                catalog_name=normalized["workspace"]["name"],
+                expected_bucket_name=expected_bucket_name(normalized),
+                workspace_profile=workspace_profile,
+            )
+        )
 
     results.extend(_not_implemented_checks())
 
     return results
+
+
+def expected_bucket_name(normalized: dict) -> str:
+    """
+    Recompute the Unity Catalog S3 bucket name the same way
+    modules/unity-catalog-data/locals.tf does
+    (`${workspace_name}-${aws_account_id}-${region}-uc`) - kept in sync by
+    convention/comment on both sides rather than a shared output, since
+    Terraform and Python can't literally share a function. If that naming
+    convention ever changes, update both.
+    """
+
+    return (
+        f"{normalized['workspace']['name']}-{normalized['cloud']['account']}-"
+        f"{normalized['cloud']['region']}-uc"
+    )
+
+
+def check_catalog_contents(
+    catalog_name: str,
+    expected_bucket_name: str,
+    workspace_profile: str | None,
+) -> CheckResult:
+    """
+    Verifies the catalog's live isolation_mode and storage_root - needs a
+    workspace-scoped Databricks profile (`databricks auth login --host
+    <workspace_url>`), since `databricks catalogs get` is a workspace-level
+    API, unlike every other check here which uses the account-console
+    profile. Reports SKIPPED (not FAIL) when no such profile is given -
+    the check exists and works, it just wasn't run this time.
+    """
+
+    if not workspace_profile:
+        return CheckResult(
+            "governance.unity_catalog.catalog",
+            SKIPPED,
+            "No --workspace-profile given. Run `databricks auth login "
+            "--host <workspace_url>` once, then pass the resulting "
+            "profile name here to verify live catalog contents/isolation.",
+        )
+
+    catalog, error = run_databricks(
+        ["catalogs", "get", catalog_name], workspace_profile
+    )
+
+    if catalog is None:
+        return CheckResult(
+            "governance.unity_catalog.catalog",
+            FAIL,
+            f"Could not fetch catalog: {error}",
+        )
+
+    isolation_mode = catalog.get("isolation_mode")
+    storage_root = catalog.get("storage_root", "") or ""
+
+    if isolation_mode != "ISOLATED":
+        return CheckResult(
+            "governance.unity_catalog.catalog",
+            FAIL,
+            f"isolation_mode={isolation_mode!r} (expected 'ISOLATED')",
+        )
+
+    if not storage_root.startswith(f"s3://{expected_bucket_name}"):
+        return CheckResult(
+            "governance.unity_catalog.catalog",
+            FAIL,
+            f"storage_root={storage_root!r} does not point at the expected "
+            f"bucket {expected_bucket_name!r}",
+        )
+
+    return CheckResult(
+        "governance.unity_catalog.catalog",
+        PASS,
+        f"isolation_mode=ISOLATED, storage_root={storage_root!r}",
+    )
 
 
 def _not_implemented_checks() -> list[CheckResult]:
@@ -357,6 +452,15 @@ def main() -> int:
     )
 
     parser.add_argument(
+        "--workspace-profile",
+        help="Optional workspace-scoped Databricks CLI profile "
+        "(`databricks auth login --host <workspace_url>`), separate from "
+        "--profile. Enables the governance.unity_catalog.catalog check "
+        "(live catalog isolation/storage_root); omitted, that check "
+        "reports SKIPPED rather than running.",
+    )
+
+    parser.add_argument(
         "--normalized",
         help="Override path to the normalized YAML.",
     )
@@ -391,7 +495,9 @@ def main() -> int:
     deployment = load_yaml(deployment_path)
     inventory = load_yaml(ROOT / "platform" / "inventory" / "aws.yaml")
 
-    results = run_checks(normalized, deployment, inventory, args.profile)
+    results = run_checks(
+        normalized, deployment, inventory, args.profile, args.workspace_profile
+    )
 
     print_report(results)
 
