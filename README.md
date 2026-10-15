@@ -163,6 +163,20 @@ Run these from the repository root unless noted otherwise.
    ```
    Read the plan before applying. See warnings below.
 
+8. **(Optional) Validate the deployment.** After a successful apply, with
+   `infrastructure/workspace/` still pointed at this workspace's backend:
+   ```
+   python resolver/validate_deployment.py --workspace <name> --profile <same-profile-as-apply>
+   ```
+   Checks the live workspace against what was resolved for it (workspace
+   running, network/encryption/Unity Catalog wiring) and reports
+   `PASS`/`FAIL`/`N/A`/`NOT_IMPLEMENTED` per check. Exits non-zero only
+   when a real check fails **and** the environment's
+   `validation.blocking` is true (`dev` is not; `stage`/`live` are).
+   `identity.required`/`logging.centralized` always report
+   `NOT_IMPLEMENTED` — no SCIM/user provisioning or audit-log-delivery
+   Terraform resource exists in this pipeline yet.
+
 ## ⚠️ Warnings for manual deployments
 
 - **Always re-run step 6 before touching any workspace, every time.**
@@ -182,6 +196,18 @@ Run these from the repository root unless noted otherwise.
   target workspace.
 - **`terraform destroy` carries the same backend risk as `apply`.** Confirm
   which `-backend-config` is active before running it.
+- **`local.auto.tfvars`'s `databricks_profile` must match the workspace
+  you're applying, every time — it's one global setting, not per-workspace.**
+  Workspaces on different Databricks accounts need different profiles
+  (e.g. the account-console profile authenticated for account A won't
+  authenticate against account B). Getting this wrong fails loudly
+  (`databricks CLI not found` / auth errors) rather than silently
+  applying to the wrong account, but it's easy to forget when switching
+  between workspaces. Same applies if `DATABRICKS_CLI_PATH` is set in
+  your shell environment and points at a stale/uninstalled CLI location —
+  the provider respects it over auto-detecting the CLI on `PATH`; unset
+  it if you hit `databricks CLI not found` despite `databricks` working
+  fine from the command line.
 - **`databricks_mws_credentials` can fail on the very first apply attempt**
   right after the cross-account IAM role is created, with *"Failed
   credential validation checks."* This is IAM trust-policy propagation lag,

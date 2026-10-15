@@ -15,6 +15,11 @@ variable "databricks_workspace_id" {
   type        = string
 }
 
+variable "existing_metastore_id" {
+  description = "ID of the existing, platform-owned Unity Catalog metastore this workspace is assigned to. Required on databricks_storage_credential when managed through an account-level provider (confirmed empirically - the provider's own docs list it as required in that mode, easy to miss since it's optional for a workspace-level provider)."
+  type        = string
+}
+
 variable "aws_account_id" {
   description = "AWS account ID hosting the workspace."
   type        = string

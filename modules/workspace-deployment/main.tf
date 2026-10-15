@@ -223,6 +223,7 @@ module "unity_catalog_data" {
   workspace_name          = local.workspace_name
   databricks_account_id   = var.databricks_account_id
   databricks_workspace_id = databricks_mws_workspaces.this.workspace_id
+  existing_metastore_id   = var.existing_metastore_id
   aws_account_id          = data.aws_caller_identity.current.account_id
   aws_region              = var.cloud.region
 

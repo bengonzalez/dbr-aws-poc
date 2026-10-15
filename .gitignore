@@ -39,3 +39,7 @@ __pycache__/
 # through the same Terraform root. TF_VAR_databricks_profile (env var) works
 # just as well and needs no file at all.
 infrastructure/workspace/**/local.auto.tfvars
+
+# Point-in-time reports from resolver/validate_deployment.py
+# (validation.evidence == "required"). Not source config - never commit.
+validation-evidence/

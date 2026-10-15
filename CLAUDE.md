@@ -114,7 +114,7 @@ requirements, security controls, Terraform behavior.
 | Path | Status | Notes |
 |---|---|---|
 | `workspace-requests/{dev,stage,live}/` | Working | Minimal requester input YAML. One `document-ai` request per env exists as the test case. |
-| `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `generate_tfvars.py` turns that + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/<env>/<name>/` (§8 milestone 13). `generate_backend_config.py` turns `normalized/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (**new**, §8 milestone 14) scans every committed `deployment.yaml` for CIDR collisions/pool violations; called automatically by `generate_tfvars.py` before it writes tfvars. See §5 gaps. |
+| `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`, `validate_deployment.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `generate_tfvars.py` turns that + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/<env>/<name>/` (§8 milestone 13); its metastore-lookup logic is factored into a shared `resolve_metastore_id()` function (§8 milestone 23). `generate_backend_config.py` turns `normalized/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (§8 milestone 14) scans every committed `deployment.yaml` for CIDR collisions/pool violations; called automatically by `generate_tfvars.py` before it writes tfvars. `validate_deployment.py` (**new**, §8 milestone 23) checks a *deployed* workspace's live AWS/Databricks state against what was resolved for it — run manually, post-apply, not wired into anything automatically. See §5 gaps. |
 | `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. `workspace-request.schema.json` gained an optional `governance.catalog_admin_principal` (§8 milestone 22) — the first requester-controlled `governance` field; every other `governance.*` value is policy/profile-derived. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. |
 | `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely — `policies/network.yaml`'s `allowed_strategies` is now the only thing with an opinion on network strategy per environment (§8 milestone 16). |
 | `policies/policies.yaml` | Working | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping + per-environment `allowed_strategies`, validation blocking per env), one key per domain (`network_policy`, `security_policy`, `data_policy`, `governance_policy`, `validation_policy`). Trimmed to only the fields `resolver.py` actually reads (§8 milestone 15), gained `network_policy.allowed_strategies` (§8 milestone 16), then merged from five separate files into this one 2026-10-14 (§8 milestone 18 — closes §5.13's config-layer complexity review). |
@@ -130,7 +130,7 @@ requirements, security controls, Terraform behavior.
 | `modules/networking`, `modules/kms`, `modules/security`, `modules/storage`, `modules/endpoints` | POC-era, superseded for the factory | Built for the single-shot POC (`infrastructure/nonprod/poc`). Hardcode `var.project_name`, use a placeholder `ec2.amazonaws.com` trust policy in `security` (explicitly flagged in that file's own comment as provisional), single KMS key, 2-bucket storage. `modules/kms` is superseded by `modules/workspace-kms`, and `modules/endpoints` by `modules/workspace-endpoints`, for the factory path — both POC modules stay only for `infrastructure/nonprod/poc`, don't extend them further. `networking`/`security`/`storage` still need generalized replacements if/when needed. |
 | `modules/workspace-deployment` | **Working** | The composed, real deployment logic: network, endpoints, PrivateLink, IAM role, KMS, credentials/storage/network/workspace registration. Called by the one shared root (above) for every workspace — no longer "called by every new per-workspace directory" now that milestone 10's approach was superseded by milestone 12. Deliberately excludes the old scratch `terraform_data.workspace_configuration` resource (§5.5) — no reason to carry known debt into this module. |
 | `modules/workspace-network`, `modules/workspace-endpoints`, `modules/workspace-privatelink`, `modules/workspace-iam-role`, `modules/workspace-kms` | Working | Factory-style modules composed by `modules/workspace-deployment`. `workspace-network` supports independent existing-or-create per sub-resource (vpc/routing/security-group) — both `custom` and `isolated` strategies are now real, not just modeled in config (§8). `workspace-endpoints` provides the S3 gateway + STS (+ KMS, conditionally) interface endpoints needed whenever there's no NAT; its interface-endpoint security group ingress is scoped to the workspace compute security group (not a CIDR) — matches the SRA reference's approach (§7/§8). `workspace-privatelink` (**new**) registers the two Databricks PrivateLink endpoints (REST API + SCC relay) and private access settings so classic compute can reach the control plane with no NAT — see §7/§8. `workspace-iam-role` uses proper Databricks cross-account trust + restricted policy. `workspace-kms` provisions the customer-managed workspace-storage + managed-services keys, gated on `encryption.workspace == "customer_managed"`, with optional bring-your-own-existing-key inputs per key (§8). |
-| `modules/unity-catalog-data/`, `modules/unity-catalog-workspace/` | **Working** (§8 milestone 19) | `unity-catalog-data`: dedicated S3 bucket for UC managed storage, optional customer-managed KMS key (gated on `encryption.application_data`), the UC IAM role/policy chain (via `databricks_aws_unity_catalog_assume_role_policy`/`_policy` data sources, bootstrapped SRA-style to avoid the storage-credential/role circular dependency), a `time_sleep` for IAM propagation, storage credential, external location. `unity-catalog-workspace`: metastore assignment (to an existing, platform-owned metastore — not created here) + a dedicated, always-isolated catalog per workspace. Both composed into `modules/workspace-deployment`, gated on `governance.unity_catalog`, called *after* `databricks_mws_workspaces.this` (all three UC resources that need a real workspace ID use `provider_config { workspace_id }` against the existing account-console provider — no second workspace-scoped provider needed). |
+| `modules/unity-catalog-data/`, `modules/unity-catalog-workspace/` | **Working, real-apply-verified** (§8 milestones 19, 21, 23) | `unity-catalog-data`: dedicated S3 bucket for UC managed storage, optional customer-managed KMS key (gated on `encryption.application_data`), the UC IAM role/policy chain (via `databricks_aws_unity_catalog_assume_role_policy`/`_policy` data sources, bootstrapped SRA-style to avoid the storage-credential/role circular dependency), a `time_sleep` for IAM propagation, storage credential (with an explicit `metastore_id` — required for account-level providers, §8 milestone 23), external location, and explicit `databricks_workspace_binding` resources for both the credential and external location (neither auto-binds to its creating workspace the way `databricks_catalog` does — found via a real apply, §8 milestone 23). `unity-catalog-workspace`: metastore assignment (to an existing, platform-owned metastore — not created here) + a dedicated, always-isolated catalog per workspace + default namespace setting + optional `databricks_grants` (§8 milestone 21). Both composed into `modules/workspace-deployment`, gated on `governance.unity_catalog`, called *after* `databricks_mws_workspaces.this` (every UC resource that needs a real workspace ID uses `provider_config { workspace_id }` against the existing account-console provider — no second workspace-scoped provider needed). Real-apply-verified against `isolated-proof` (§8 milestone 23), not just `terraform plan`. |
 | `modules/databricks-account/`, `modules/databricks-workspace/` | **Empty — not started, scope clarified** | Reserved for genuinely account-wide/workspace-hardening SRA features not yet requested (legacy feature disabling, compliance security profile, enhanced security monitoring, audit log delivery, user assignment, network policy) — **not** Unity Catalog, which went into the two `unity-catalog-*` modules above instead (§8 milestone 19 resolves an ambiguity that existed in §7's own notes about where UC code should live). |
 | `resolver/__pycache__` | n/a | Build artifact, should be gitignored if not already. |
 
@@ -216,6 +216,22 @@ is to set `endpoints_ownership_override = "terraform"` for dev specifically
   Terraform-managed) and is still live at the time of writing. All three
   workspaces' `deployment.yaml`/`tfvars.json`/`s3.tfbackend` files are kept
   so any of them can be redeployed later through the new shared root.
+- **`isolated-proof` re-applied for real on 2026-10-14** (§8 milestone
+  23, to verify the new validation harness against live infrastructure) —
+  workspace id `7474647501620182`, url
+  `https://dbc-10c1218d-d7d7.cloud.databricks.com`, Unity Catalog fully
+  wired (catalog `isolated-proof`, assigned to metastore
+  `0745ece3-cb83-4a7f-9dc5-dc1716c015c7`). Still live at the time of
+  writing — whether to destroy it again is a separate, pending decision.
+  This apply surfaced three real Terraform/provider gaps not caught by
+  `terraform plan` (all fixed, see milestone 23 for detail):
+  `databricks_storage_credential` needs an explicit `metastore_id` when
+  managed through an account-level provider; `storage_credential`/
+  `external_location` (unlike `catalog`) don't auto-bind to their
+  creating workspace and need explicit `databricks_workspace_binding`
+  resources; and that binding resource itself also needs
+  `provider_config { workspace_id }`, not just its own top-level
+  `workspace_id` argument.
 
 ## 5. Known gaps / inconsistencies to resolve
 
@@ -284,9 +300,10 @@ is to set `endpoints_ownership_override = "terraform"` for dev specifically
    `databricks_aws_crossaccount_policy` approach is the correct one and
    should be the template for any further IAM work (e.g. the eventual UC
    data-access role).
-8. **No workspace-level validation harness yet.** `policies/validation.yaml`
-   defines `blocking`/`evidence`/`negative_tests` per environment, but nothing
-   in the repo currently executes those checks against a live deployment.
+8. **No workspace-level validation harness yet — fixed, see §8 milestone
+   23.** `policies/policies.yaml`'s `validation_policy` defines
+   `blocking`/`evidence`/`negative_tests` per environment; now actually
+   consumed by `resolver/validate_deployment.py`.
 9. **Per-resource network/KMS ownership was computed by the resolver but
    never consumed by Terraform — fixed at the Terraform layer, not the
    resolver layer.** `resolver.py` has always computed `network.requirements.
@@ -1387,6 +1404,147 @@ Priority order agreed on:
       restore it. Regenerated `terraform.tfvars.json` for all three real
       workspaces afterward (none set the field) — byte-identical;
       `terraform plan` unchanged (27/34/33, same as milestone 21).
+23. **Workspace validation harness built — closes §5.8** (2026-10-14).
+    `policies/policies.yaml`'s `validation_policy` had resolved
+    `required`/`blocking`/`negative_tests`/`evidence` into every
+    `normalized/*.yaml` since the resolver was first built, with nothing
+    ever executing against a live deployment. The original `checks:`
+    block (`workspace.exists`, `network.required`, `identity.required`,
+    `encryption.required`, `governance.unity_catalog`,
+    `logging.centralized`) had been deliberately removed from
+    `policies.yaml` during the config-layer trim (milestone 15)
+    specifically because nothing consumed it — this milestone is that
+    consumer, rebuilt from scratch rather than resurrecting the deleted
+    block verbatim.
+    - **Two explicit decisions made with the user before building**:
+      (a) `identity.required`/`logging.centralized` report a distinct
+      `NOT_IMPLEMENTED` status, not `FAIL` — no SCIM/user provisioning or
+      audit-log-delivery Terraform resource exists anywhere in this
+      pipeline, so a real `FAIL` would permanently block every
+      `stage`/`live` deployment (`blocking = true` there) over features
+      deliberately deferred project-wide; `NOT_IMPLEMENTED` is honest
+      without being punitive, and is documented here as explicit future
+      work, not silently dropped. (b) the user explicitly chose to apply
+      a real workspace to fully verify the harness against live
+      infrastructure, rather than just checking its logic — see §4a for
+      which one (`isolated-proof`) and why.
+    - New `resolver/validate_deployment.py`: `--workspace <name>
+      --profile <databricks-account-console-profile>`. Reads
+      `normalized/<name>.yaml` (`validation.blocking`/`evidence`,
+      `governance.*`, `encryption.*`) and `deployment.yaml`
+      (`databricks.account_id`), runs `terraform output -json` from
+      `infrastructure/workspace/` (requires that root already
+      `terraform init`'d against this workspace's backend-config — same
+      standing convention as plan/apply) to get the live
+      `databricks_workspace_id`, then checks via `databricks` CLI
+      subprocess calls (account-console profile, same kind used
+      throughout this project):
+      - `workspace.exists` — `PASS` iff `workspace_status == "RUNNING"`.
+      - `network.required` — `PASS` iff the workspace has a real
+        `network_id` (confirms customer-managed networking).
+      - `encryption.required` — `N/A` when `encryption.workspace` is
+        `platform_managed` (SSE-S3 already guaranteed by Terraform's own
+        successful apply, nothing further to check live); `PASS`/`FAIL`
+        on the live workspace's CMK key-id fields when
+        `customer_managed`.
+      - `governance.unity_catalog` — `PASS` iff
+        `databricks account metastore-assignments get` returns the
+        *expected* metastore id (computed via the same
+        `resolve_metastore_id()` helper `generate_tfvars.py` uses — see
+        refactor below, not a second drifting copy of that lookup).
+        **Deliberately scoped down** from the original idea: doesn't
+        verify the catalog's live contents/isolation, since that needs a
+        workspace-scoped Databricks profile (a separate `databricks auth
+        login --host <workspace_url>`), not the account-console one used
+        everywhere else — flagged as an explicit, scoped-out future
+        enhancement.
+      - `identity.required`/`logging.centralized` — always
+        `NOT_IMPLEMENTED` (see decision above).
+      - Exit code `0` unless `validation.blocking` is `true` **and** at
+        least one check is `FAIL` (`N/A`/`NOT_IMPLEMENTED` never trigger
+        it) — what a future CI pipeline would gate on.
+      - When `validation.evidence == "required"` (today: `live` only),
+        additionally writes a timestamped JSON report to
+        `validation-evidence/<workspace>/<timestamp>.json` (new,
+        gitignored — a point-in-time artifact, not source config).
+    - Small refactor, `resolver/generate_tfvars.py`: extracted the
+      inline metastore-lookup logic (inventory + override + the
+      `require()` check, milestone 20) into a standalone
+      `resolve_metastore_id()` function — same behavior, now importable
+      by `validate_deployment.py` too. Verified behavior-preserving:
+      regenerated tfvars for all three real workspaces, byte-identical.
+    - **Real apply of `isolated-proof` (2026-10-14) surfaced three real
+      Terraform/provider gaps, none of which `terraform plan` had caught**:
+      1. `databricks_storage_credential` failed with *"No API found for
+         'POST /accounts/.../metastores/storage-credentials'"* — the
+         provider's own docs say `metastore_id` is "required for
+         account-level providers," but the original implementation
+         (milestone 19) never set it. Fixed: added `existing_metastore_id`
+         as a new input to `modules/unity-catalog-data`, threaded in from
+         `modules/workspace-deployment`, set as `metastore_id` on the
+         `databricks_storage_credential` resource.
+      2. `databricks_external_location` then failed with *"Credential
+         ... is not accessible in current workspace"* — unlike
+         `databricks_catalog` (whose docs explicitly say `isolation_mode
+         = "ISOLATED"` auto-binds to its creating workspace),
+         `storage_credential`'s and `external_location`'s own
+         `ISOLATION_MODE_ISOLATED` does **not** auto-bind (confirmed
+         empirically; neither resource's docs ever claimed it would).
+         Fixed: added explicit `databricks_workspace_binding` resources
+         for both, in `modules/unity-catalog-data`.
+      3. The new `databricks_workspace_binding` resources then failed
+         with *"managing a workspace-level resource requires a
+         workspace_id, but none was found"* — needed
+         `provider_config { workspace_id }` too, not just the resource's
+         own top-level `workspace_id` argument (which is the *target* of
+         the binding, a different thing from "which workspace context
+         the API call itself runs in"). Fixed by adding the
+         `provider_config` block to both bindings, matching every other
+         UC resource's pattern.
+      Each fix was `terraform plan`-verified, then re-applied, in
+      sequence, against the same real `isolated-proof` apply — this is
+      exactly why the user's call to apply a real workspace (rather than
+      only checking the harness's logic) mattered: none of these three
+      gaps would have surfaced from `terraform plan` alone, since plan
+      can't detect behavior that only manifests when the Databricks
+      control plane actually processes the request.
+    - **Two unrelated real environment issues found and worked around
+      (not code bugs — flagged in `README.md`'s warnings, not silently
+      fixed)**: (a) `infrastructure/workspace/local.auto.tfvars` had
+      `databricks_profile = "bxg3611 Premium"` (the *other* test
+      account's profile) still set from earlier `document-ai-dev` work —
+      `isolated-proof` needs `TSA` (account `eddbb85f...`). This is a
+      structural gotcha, not a one-off mistake: `databricks_profile` is
+      one global value, not per-workspace, so it must be re-set whenever
+      switching which workspace/account is being applied. (b) a stale
+      `DATABRICKS_CLI_PATH` environment variable pointed at a
+      since-uninstalled Chocolatey `databricks-cli` location; the
+      provider's `auth_type = "databricks-cli"` respects that env var
+      over auto-detecting the real (WinGet-installed) CLI on `PATH`,
+      causing a *"databricks CLI not found"* error despite `databricks`
+      working fine from the command line. Both fixed by setting the
+      correct profile and unsetting the env var for the apply commands;
+      documented in `README.md`'s warnings section so the next person
+      hitting either recognizes it immediately instead of suspecting the
+      Terraform code.
+    - Verified end to end: ran the harness against `isolated-proof`'s
+      *destroyed* state first (free negative-path test) — correct
+      `FAIL`/not-found handling on every check, no crash. Applied
+      `isolated-proof` for real (workspace id `7474647501620182`).
+      Re-ran the harness against the live workspace: `3 PASS` (
+      `workspace.exists`, `network.required`, `governance.unity_catalog`
+      — the last confirmed against the real metastore assignment),
+      `1 N/A` (`encryption.required`, dev is platform_managed),
+      `2 NOT_IMPLEMENTED` (identity, logging) — exit code `0`
+      (`STATUS: PASSED`). Also confirmed the evidence-writing path
+      works (temporarily simulated `live`-style `blocking: true`/
+      `evidence: required` settings against `isolated-proof`'s
+      destroyed state — correct JSON file written, correct blocking
+      exit code `1` — then reverted). Re-verified `document-ai-dev`'s
+      and `client-vpc-proof`'s plans after the three Terraform fixes
+      above — both grew by exactly 2 resources each (the new
+      `workspace_binding`s), no errors, confirming the fixes apply
+      cleanly everywhere, not just to `isolated-proof`.
 
 ## 9. Conventions observed (keep consistent)
 

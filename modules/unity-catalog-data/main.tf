@@ -100,11 +100,32 @@ resource "databricks_storage_credential" "this" {
   provider = databricks.mws
 
   name           = "${var.workspace_name}-uc-storage-credential"
+  metastore_id   = var.existing_metastore_id
   isolation_mode = "ISOLATION_MODE_ISOLATED"
 
   aws_iam_role {
     role_arn = "arn:aws:iam::${var.aws_account_id}:role/${local.uc_role_name}"
   }
+
+  provider_config {
+    workspace_id = var.databricks_workspace_id
+  }
+}
+
+# Unlike databricks_catalog's isolation_mode (which auto-binds to its
+# creating workspace per the provider's own docs), storage_credential and
+# external_location's isolation_mode does NOT auto-bind - confirmed
+# empirically (2026-10-14, real apply against isolated-proof): the
+# external_location below failed with "Credential ... is not accessible
+# in current workspace" without this explicit binding. Neither resource's
+# docs ever claimed auto-bind the way catalog's did, so this is now the
+# explicit, non-ambiguous fix rather than relying on undocumented behavior.
+resource "databricks_workspace_binding" "storage_credential" {
+  provider = databricks.mws
+
+  securable_name = databricks_storage_credential.this.name
+  securable_type = "storage_credential"
+  workspace_id   = var.databricks_workspace_id
 
   provider_config {
     workspace_id = var.databricks_workspace_id
@@ -185,6 +206,21 @@ resource "databricks_external_location" "this" {
   }
 
   depends_on = [
-    time_sleep.unity_catalog_iam_propagation
+    time_sleep.unity_catalog_iam_propagation,
+    databricks_workspace_binding.storage_credential,
   ]
+}
+
+# Same reasoning as the storage_credential binding above - the external
+# location's own isolation_mode doesn't auto-bind either.
+resource "databricks_workspace_binding" "external_location" {
+  provider = databricks.mws
+
+  securable_name = databricks_external_location.this.name
+  securable_type = "external_location"
+  workspace_id   = var.databricks_workspace_id
+
+  provider_config {
+    workspace_id = var.databricks_workspace_id
+  }
 }
