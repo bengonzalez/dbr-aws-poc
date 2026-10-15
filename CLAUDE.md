@@ -265,21 +265,23 @@ is to set `endpoints_ownership_override = "terraform"` for dev specifically
    concrete ids" boundary. Revisit only if a real need arises for the
    normalized contract itself to carry a resolved VPC id (none has yet).
 4. **No normalized-YAML → tfvars generator — done, see §8.** `resolver/
-   generate_tfvars.py` now does this. `infrastructure/workspace/dev.tfvars`
-   (hand-written, HCL) is superseded by the generated
-   `document-ai-dev.tfvars.json` — both currently produce an identical
-   zero-diff `terraform plan` against the live dev workspace.
-   **Decision (2026-10-09): keep `dev.tfvars` for now, flagged for removal.**
-   It's redundant now that the generated file is proven equivalent, but the
-   user wants to keep it around a bit longer (e.g. as a sanity-check
-   reference) before deleting it. Treat it as cleanup debt — safe to delete
-   once the generated `*.tfvars.json` workflow has proven itself over a few
-   more iterations, but don't remove it unprompted.
-5. **`terraform_data.workspace_configuration` in `infrastructure/workspace/main.tf`**
-   (lines ~30–67) is leftover/scratch — it stores resolved inputs in a no-op
-   resource for inspection but isn't part of the real deployment.
-   **Decision: flagged as cleanup debt, not removed yet.** Remove once it's no
-   longer needed for inspecting resolved values during development.
+   generate_tfvars.py` does this. The old hand-written HCL
+   `infrastructure/workspace/dev.tfvars` it superseded was **removed
+   2026-10-15** (§8 milestone 26) — it had been kept deliberately as a
+   sanity-check reference while the generated workflow proved itself,
+   and by this point had proven itself many times over (CIDR checks,
+   Unity Catalog, inventory auto-lookups, several real applies) and had
+   also gone genuinely stale (no `existing_metastore_id`, hardcoded
+   `databricks_profile` inline rather than via `local.auto.tfvars`/env
+   var — it would not have worked if actually used).
+5. **`terraform_data.workspace_configuration` scratch resource — moot,
+   never existed in the current shared root.** This referred to
+   `infrastructure/workspace/main.tf` lines ~30–67 from *before* the
+   shared-root + module rework (§8 milestone 12) — `modules/
+   workspace-deployment` (built in milestone 10, still the basis for the
+   current shared root) deliberately never carried this scratch resource
+   over. Confirmed 2026-10-15: no `terraform_data` resource exists
+   anywhere in the current `.tf` files. Nothing to clean up.
 6. **Network default mismatch vs. design notes — resolved.** The Notion
    framework notes' "Current Decision Baseline" says dev/stage should default
    to an *isolated* (dedicated, Terraform-owned VPC) network model, but every
@@ -1665,6 +1667,27 @@ Priority order agreed on:
       override, fails clearly (caught by `check_cidr_allocations.py`,
       which runs first in the pipeline - the same root cause
       `resolve_platform_network()`'s own check would catch if reached).
+26. **Minor cleanup debt closed — §5.4 and §5.5** (2026-10-15).
+    - Removed `infrastructure/workspace/dev.tfvars` — the old
+      hand-written HCL tfvars file for `document-ai-dev`, superseded by
+      the generated `*.tfvars.json` workflow back in milestone 4 and
+      deliberately kept around since as a sanity-check reference. By
+      now it had both proven itself many times over and gone genuinely
+      stale (no `existing_metastore_id`, `databricks_profile` hardcoded
+      inline rather than via `local.auto.tfvars`/env var) — it would not
+      have actually worked if used for a real `plan`/`apply` today.
+      Confirmed nothing outside historical milestone narrative in this
+      file referenced it before removing. `terraform fmt`/`validate`
+      clean afterward.
+    - Confirmed §5.5's `terraform_data.workspace_configuration` scratch
+      resource is moot — it referred to the *pre-shared-root* flat
+      `infrastructure/workspace/main.tf` (before milestone 12), and
+      `modules/workspace-deployment` (built in milestone 10, still the
+      basis for the current shared root) never carried it over in the
+      first place. `grep -rn "terraform_data" --include="*.tf"` across
+      the whole repo returns nothing. Nothing to clean up — just closing
+      a gap that had already been resolved without ever being marked
+      closed.
 
 ## 9. Conventions observed (keep consistent)
 
