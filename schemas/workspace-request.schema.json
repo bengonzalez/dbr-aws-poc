@@ -198,6 +198,14 @@
         "existing_security_group_id": {
           "type": "string",
           "description": "ID of an existing security group the client is handing over, instead of one Terraform creates. Optional - when present, security group ownership automatically resolves to 'existing' (no separate ownership override needed)."
+        },
+
+        "existing_route_table_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "IDs of existing route tables the client's existing VPC (existing_vpc_id) already has, for Terraform to attach new subnets to instead of creating fresh route tables. Optional - when present, routing (and, by default, endpoints) ownership automatically resolves to 'existing'. Omit when the VPC has no usable route tables yet (e.g. a bare VPC) - routing then correctly resolves to 'terraform'."
         }
       },
 

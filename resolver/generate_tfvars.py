@@ -16,7 +16,7 @@ from inventory import (
     resolve_existing_vpc_cidr,
     resolve_metastore_id,
     resolve_platform_network,
-    route_table_ids_known,
+    resolve_route_table_ids,
     subnet_defaults_for,
 )
 
@@ -47,9 +47,9 @@ def resolve_network_ownership(
     when Terraform owns the VPC itself, routing is necessarily also
     "terraform" (nothing existing to reuse - not a choice). Otherwise,
     it's "existing" only when route table ids are actually known for
-    THIS VPC (inventory.route_table_ids_known()) - not "existing" with
-    nothing to actually reuse. overrides.routing_ownership remains a
-    rare escape hatch on top of this.
+    THIS VPC (inventory.resolve_route_table_ids()) - not "existing"
+    with nothing to actually reuse. overrides.routing_ownership remains
+    a rare escape hatch on top of this.
 
     endpoints_ownership defaults to whatever routing_ownership just
     resolved to: a VPC with no known route tables has, in every real
@@ -76,11 +76,19 @@ def resolve_network_ownership(
         aws_account_id = normalized["cloud"]["account"]
         region = normalized["cloud"]["region"]
         requested_vpc_id = normalized["network"].get("existing_vpc_id")
+        requested_route_table_ids = normalized["network"].get(
+            "existing_route_table_ids"
+        )
 
         routing_ownership = overrides.get("routing_ownership") or (
             "existing"
-            if route_table_ids_known(
-                aws_account_id, region, deployment, inventory, requested_vpc_id
+            if resolve_route_table_ids(
+                aws_account_id,
+                region,
+                deployment,
+                inventory,
+                requested_vpc_id,
+                requested_route_table_ids,
             )
             else "terraform"
         )
@@ -302,12 +310,25 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
     requirements["subnets"] = subnets
     network["requirements"] = requirements
 
-    # connectivity/vpc_cidr/existing_vpc_id/existing_vpc_cidr are all
+    # connectivity/vpc_cidr/existing_vpc_id/existing_vpc_cidr/
+    # existing_security_group_id/existing_route_table_ids are all
     # resolved separately (into privatelink_enabled_override/
-    # nat_enabled_override/vpc_cidr/platform below) - var.network's object
-    # type doesn't declare any of them, since each is consumed as its own
-    # standalone variable, not threaded through the network object itself.
-    for key in ("connectivity", "vpc_cidr", "existing_vpc_id", "existing_vpc_cidr"):
+    # nat_enabled_override/vpc_cidr/platform/existing_security_group_id
+    # below) - var.network's object type doesn't declare any of them,
+    # since each is consumed as its own standalone variable, not
+    # threaded through the network object itself. (existing_security_
+    # group_id/existing_route_table_ids weren't being stripped here
+    # before this fix - a real bug introduced in milestone 29, latent
+    # because no real or throwaway test for that field had been run
+    # through terraform validate/plan, only inspected as raw JSON.)
+    for key in (
+        "connectivity",
+        "vpc_cidr",
+        "existing_vpc_id",
+        "existing_vpc_cidr",
+        "existing_security_group_id",
+        "existing_route_table_ids",
+    ):
         network.pop(key, None)
 
     tfvars = {
@@ -360,6 +381,9 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
         need_vpc=vpc_ownership == "existing",
         need_routing=routing_ownership == "existing",
         requested_vpc_id=normalized["network"].get("existing_vpc_id"),
+        requested_route_table_ids=normalized["network"].get(
+            "existing_route_table_ids"
+        ),
     )
 
     if platform:

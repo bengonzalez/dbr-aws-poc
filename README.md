@@ -122,7 +122,12 @@ Run these from the repository root unless noted otherwise.
    already claimed by another committed workspace sharing that VPC. If
    you're also handing over an existing security group, supply
    `network.existing_security_group_id` too — no separate ownership
-   override is needed, its presence is enough.
+   override is needed, its presence is enough. If your existing VPC
+   *already has* usable route tables you want new subnets attached to
+   (rather than fresh ones Terraform creates), supply
+   `network.existing_route_table_ids` too — its presence alone resolves
+   routing (and, by default, endpoints) ownership to `existing`; omit
+   it for a bare VPC with nothing to reuse yet.
 
    **Other optional request fields**, each with a platform-wide default
    so most workspaces never need them: `cloud.databricks_account_id`

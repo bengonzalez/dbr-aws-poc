@@ -147,40 +147,47 @@ def find_primary_network(aws_account_id: str, region: str, inventory: dict) -> d
     )
 
 
-def route_table_ids_known(
+def resolve_route_table_ids(
     aws_account_id: str,
     region: str,
     deployment: dict,
     inventory: dict,
     requested_vpc_id: str | None,
-) -> bool:
+    requested_route_table_ids: list[str] | None,
+) -> list[str] | None:
     """
-    Whether route table ids are actually known for the effective VPC a
-    workspace is reusing - the signal routing_ownership is now inferred
-    from (CLAUDE.md §8 milestone 30), instead of a blind per-strategy
-    default or a manual override.
+    Resolve route table ids for the effective VPC a workspace is
+    reusing - the single source of truth both for "are route tables
+    known" (drives routing_ownership inference, CLAUDE.md §8 milestone
+    30) and "what are they" (the actual Terraform platform.
+    route_table_ids value, consumed by resolve_platform_network()) -
+    previously two separate, drift-prone implementations.
 
-    True when deployment.yaml's 'platform.route_table_ids' is set
-    directly, OR when the effective VPC id (deployment override >
-    requested_vpc_id > unset, same precedence as
-    resolve_platform_network()) is unset or matches the account/region's
-    known 'primary' network's own vpc id AND that primary network
-    declares route tables.
+    Precedence: deployment.yaml's 'platform.route_table_ids' override >
+    the request's network.existing_route_table_ids
+    (requested_route_table_ids, CLAUDE.md §8 milestone 31 - the
+    client's own VPC's route tables) > the AWS account/region's known
+    'primary' network's route tables in platform/inventory/aws.yaml -
+    but the inventory fallback only applies when the effective VPC id
+    (deployment override > requested_vpc_id > unset) actually matches
+    that primary network's own vpc id. A different, non-primary
+    existing VPC (e.g. a client-provided one) is never entitled to
+    borrow the primary's route tables.
 
-    Fixes a latent gap in resolve_platform_network()'s own inventory
-    fallback: that function returns the primary network's route tables
-    whenever routing ownership is "existing", with no check that the
-    VPC in play is actually the primary one - a different,
-    non-primary existing VPC (e.g. a client-provided one) was never
-    entitled to borrow the primary's route tables. This function is the
-    one that decides ownership in the first place, so it enforces the
-    match itself.
+    Returns None if nothing resolves it - callers decide whether that's
+    an error (resolve_platform_network(), when routing ownership is
+    already "existing") or just means "terraform" (routing_ownership
+    inference, generate_tfvars.resolve_network_ownership()).
     """
 
     deployment_platform = deployment.get("platform") or {}
 
-    if deployment_platform.get("route_table_ids"):
-        return True
+    route_table_ids = (
+        deployment_platform.get("route_table_ids") or requested_route_table_ids
+    )
+
+    if route_table_ids:
+        return route_table_ids
 
     effective_vpc_id = deployment_platform.get("vpc_id") or requested_vpc_id
 
@@ -188,9 +195,9 @@ def route_table_ids_known(
     primary_vpc_id = primary.get("vpc", {}).get("id")
 
     if effective_vpc_id is not None and effective_vpc_id != primary_vpc_id:
-        return False
+        return None
 
-    return bool(primary.get("routing", {}).get("route_table_ids"))
+    return primary.get("routing", {}).get("route_table_ids")
 
 
 def subnet_defaults_for(aws_account_id: str, region: str, inventory: dict) -> dict:
@@ -273,6 +280,7 @@ def resolve_platform_network(
     need_vpc: bool,
     need_routing: bool,
     requested_vpc_id: str | None = None,
+    requested_route_table_ids: list[str] | None = None,
 ) -> dict:
     """
     Resolve platform.vpc_id/route_table_ids for a workspace whose VPC/
@@ -285,9 +293,10 @@ def resolve_platform_network(
     the client's own existing VPC, CLAUDE.md §8 milestone 28) > the AWS
     account/region's known 'primary' network in
     platform/inventory/aws.yaml (today's default, unchanged). Route
-    table ids only ever come from the override or the primary network -
-    a client handing over a bare VPC has no route tables to hand over
-    too.
+    table ids are resolved by resolve_route_table_ids() (CLAUDE.md §8
+    milestone 31) - deployment override > the request's
+    network.existing_route_table_ids > the primary network's own route
+    tables, only when the effective VPC actually is that primary one.
 
     Returns a dict with only the keys actually needed (need_vpc/
     need_routing), suitable for use directly as the Terraform
@@ -321,20 +330,25 @@ def resolve_platform_network(
         platform["vpc_id"] = vpc_id
 
     if need_routing:
-        route_table_ids = deployment_platform.get("route_table_ids")
-
-        if route_table_ids is None:
-            route_table_ids = find_primary_network(
-                aws_account_id, region, inventory
-            ).get("routing", {}).get("route_table_ids")
+        route_table_ids = resolve_route_table_ids(
+            aws_account_id,
+            region,
+            deployment,
+            inventory,
+            requested_vpc_id,
+            requested_route_table_ids,
+        )
 
         require(
             bool(route_table_ids),
             f"Routing ownership resolves to 'existing', but no route "
             f"table ids are known for AWS account '{aws_account_id}' "
-            f"region '{region}'. Add them to platform/inventory/aws.yaml's "
-            f"'aws.accounts' section, or set 'platform.route_table_ids' "
-            f"explicitly in this workspace's deployment file to override.",
+            f"region '{region}'. Supply 'network.existing_route_table_ids' "
+            f"in the workspace request, add them to "
+            f"platform/inventory/aws.yaml's 'aws.accounts' section (only "
+            f"used when this is the account's primary VPC), or set "
+            f"'platform.route_table_ids' explicitly in this workspace's "
+            f"deployment file to override.",
         )
 
         platform["route_table_ids"] = route_table_ids

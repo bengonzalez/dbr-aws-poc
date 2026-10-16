@@ -114,7 +114,7 @@ requirements, security controls, Terraform behavior.
 | Path | Status | Notes |
 |---|---|---|
 | `workspace-requests/{dev,stage,live}/` | Working | Minimal requester input YAML. One `document-ai` request per env exists as the test case. |
-| `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`, `validate_deployment.py`, `inventory.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `inventory.py` holds shared `platform/inventory/aws.yaml` lookups (`resolve_metastore_id()`, `find_primary_network()`, `resolve_platform_network()`, `subnet_defaults_for()`, `allocate_subnets()`, `resolve_existing_vpc_cidr()` — milestone 28; `resolve_databricks_account_id()` — milestone 29; `route_table_ids_known()` — milestone 30) — centralized here, not in `generate_tfvars.py`, specifically to avoid a circular import with `check_cidr_allocations.py`. `generate_tfvars.py` turns normalized + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/<env>/<name>/` (§8 milestone 13); its metastore and VPC/route-table lookups both come from `inventory.py` (§8 milestones 23, 25); its `ensure_subnet_allocation()` (§8 milestone 28) auto-carves and permanently pins subnet CIDRs into a sibling generated `allocated-subnets.yaml` file whenever a workspace's `deployment.yaml` doesn't hand-type its own `network.subnets.private`; `main()` now resolves `databricks_account_id` once up front (deployment override > request > inventory default, §8 milestone 29) before either of those run; its `resolve_network_ownership()` (§8 milestones 9, 30) now infers `routing_ownership`/`endpoints_ownership` from whether route table ids are actually known for the VPC in play, rather than a blind per-strategy default, and `build_tfvars()` always forwards all three ownership overrides explicitly (not just when set in `deployment.yaml`) so Terraform's own `locals.tf` coalesce can't diverge from the inference. `generate_backend_config.py` turns `normalized/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (§8 milestones 14, 25, 28) scans every committed `deployment.yaml` for CIDR collisions/pool violations, falling back to `inventory.py`'s lookup when a workspace's `deployment.yaml` omits `platform.vpc_id`, and (§8 milestone 28) merging in a workspace's `allocated-subnets.yaml` and the request's own `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` passthroughs when present; exposes `vpc_scope()`/`used_subnets_for_scope()` for `generate_tfvars.py`'s allocator to reuse; called automatically by `generate_tfvars.py` before (and after a first-time allocation) it writes tfvars. `validate_deployment.py` (§8 milestones 23-24, 29) checks a *deployed* workspace's live AWS/Databricks state against what was resolved for it — run manually, post-apply, not wired into anything automatically; its optional `--workspace-profile` additionally verifies live catalog isolation/storage via a workspace-scoped profile (§8 milestone 24); now resolves `databricks_account_id` the same 3-tier way as `generate_tfvars.py` instead of reading `deployment.yaml` directly (§8 milestone 29). See §5 gaps. |
+| `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`, `validate_deployment.py`, `inventory.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `inventory.py` holds shared `platform/inventory/aws.yaml` lookups (`resolve_metastore_id()`, `find_primary_network()`, `resolve_platform_network()`, `subnet_defaults_for()`, `allocate_subnets()`, `resolve_existing_vpc_cidr()` — milestone 28; `resolve_databricks_account_id()` — milestone 29; `resolve_route_table_ids()` — milestone 30, consolidated/renamed from `route_table_ids_known()` in milestone 31) — centralized here, not in `generate_tfvars.py`, specifically to avoid a circular import with `check_cidr_allocations.py`. `generate_tfvars.py` turns normalized + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/<env>/<name>/` (§8 milestone 13); its metastore and VPC/route-table lookups both come from `inventory.py` (§8 milestones 23, 25); its `ensure_subnet_allocation()` (§8 milestone 28) auto-carves and permanently pins subnet CIDRs into a sibling generated `allocated-subnets.yaml` file whenever a workspace's `deployment.yaml` doesn't hand-type its own `network.subnets.private`; `main()` now resolves `databricks_account_id` once up front (deployment override > request > inventory default, §8 milestone 29) before either of those run; its `resolve_network_ownership()` (§8 milestones 9, 30) now infers `routing_ownership`/`endpoints_ownership` from whether route table ids are actually known for the VPC in play, rather than a blind per-strategy default, and `build_tfvars()` always forwards all three ownership overrides explicitly (not just when set in `deployment.yaml`) so Terraform's own `locals.tf` coalesce can't diverge from the inference. `generate_backend_config.py` turns `normalized/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (§8 milestones 14, 25, 28) scans every committed `deployment.yaml` for CIDR collisions/pool violations, falling back to `inventory.py`'s lookup when a workspace's `deployment.yaml` omits `platform.vpc_id`, and (§8 milestone 28) merging in a workspace's `allocated-subnets.yaml` and the request's own `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` passthroughs when present; exposes `vpc_scope()`/`used_subnets_for_scope()` for `generate_tfvars.py`'s allocator to reuse; called automatically by `generate_tfvars.py` before (and after a first-time allocation) it writes tfvars. `validate_deployment.py` (§8 milestones 23-24, 29) checks a *deployed* workspace's live AWS/Databricks state against what was resolved for it — run manually, post-apply, not wired into anything automatically; its optional `--workspace-profile` additionally verifies live catalog isolation/storage via a workspace-scoped profile (§8 milestone 24); now resolves `databricks_account_id` the same 3-tier way as `generate_tfvars.py` instead of reading `deployment.yaml` directly (§8 milestone 29). See §5 gaps. |
 | `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. `workspace-request.schema.json` gained optional `network.connectivity` (§8 milestone 27); `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` (§8 milestone 28); and, §8 milestone 29, `network.existing_security_group_id`, a new top-level `encryption` object (`existing_workspace_storage_key_arn`/`_alias`, `existing_managed_services_key_arn`/`_alias` — the first requester-controlled `encryption` fields; `encryption.workspace`/`application_data` stay entirely profile-derived), `governance.existing_metastore_id` (alongside the milestone-22 `catalog_admin_principal` — the first two requester-controlled `governance` fields), and `cloud.databricks_account_id`. All mirrored into `normalized-config.schema.json` too. The latter's now-dead `network.requirements.subnets.allocation` sub-schema (count/AZs/cidr_source — superseded by real auto-allocation, §8 milestone 28) was removed. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. |
 | `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely — `policies/network.yaml`'s `allowed_strategies` is now the only thing with an opinion on network strategy per environment (§8 milestone 16). |
 | `policies/policies.yaml` | Working | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping + per-environment `allowed_strategies`, validation blocking per env), one key per domain (`network_policy`, `security_policy`, `data_policy`, `governance_policy`, `validation_policy`). Trimmed to only the fields `resolver.py` actually reads (§8 milestone 15), gained `network_policy.allowed_strategies` (§8 milestone 16), then merged from five separate files into this one 2026-10-14 (§8 milestone 18 — closes §5.13's config-layer complexity review). |
@@ -2047,6 +2047,76 @@ Priority order agreed on:
       added, confirmed the override still wins over the inferred value.
       `resolver/check_cidr_allocations.py` re-run clean throughout. No
       `.tf` file was touched, confirmed via `git status`.
+31. **Route table ids for a brand-new client VPC - closes the last
+    List-2 audit item** (2026-10-16). The original worry was that
+    solving this "for real" would need a live AWS lookup
+    (`aws ec2 describe-route-tables`) or a one-time inventory-
+    registration workflow for arbitrary client VPCs. Re-examined: that
+    worry didn't actually hold up - `existing_vpc_id`/
+    `existing_security_group_id` (milestones 28/29) are already
+    request-level fields describing AWS resource ids a client hands
+    over; route table ids are the same category of fact, not a harder
+    one. Closed with the identical proven pattern: new optional
+    `network.existing_route_table_ids` in `workspace-requests/*.yaml`,
+    resolved with the same deployment-override > request > inventory-
+    default precedence as everything else. No live AWS calls, no
+    registration workflow.
+    - **Consolidated two drift-prone implementations into one.**
+      Milestone 30's `route_table_ids_known()` (decides *whether*
+      routing is `"existing"`) had the correct "only trust inventory's
+      route tables when the VPC in play actually is the primary one"
+      guard; `resolve_platform_network()`'s older, separate inline
+      logic (resolves the actual route-table-id *value* once ownership
+      is already `"existing"`) did not - a real latent bug: an explicit
+      `overrides.routing_ownership: existing` on a non-primary VPC with
+      nothing else supplying route tables would still have silently
+      handed back the primary network's unrelated ids.
+      `route_table_ids_known()` was replaced with a single
+      `resolve_route_table_ids()` (returns the ids or `None`, not just
+      a bool) that both `resolve_network_ownership()` (ownership
+      inference) and `resolve_platform_network()` (the actual
+      Terraform value) now call - fixing the bug everywhere at once
+      instead of leaving two places that had to agree by convention.
+    - **A second, unrelated real bug found and fixed while in this
+      code**: `existing_security_group_id` (added to
+      `normalized.network` in milestone 29) was never being stripped
+      out of `tfvars["network"]` before assignment - since
+      `var.network`'s Terraform object type doesn't declare that key,
+      a real `terraform apply` for any workspace using it would have
+      failed on strict object-type conversion. Latent because no real
+      or throwaway test for that field had ever been run through
+      `terraform validate`/`plan` - only inspected as raw JSON.
+      `existing_route_table_ids` would have had the identical bug if
+      added without noticing; both are now stripped in the same place
+      `connectivity`/`vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr`
+      already were.
+    - Verified: regenerated tfvars for all three real workspaces -
+      **byte-identical** (none exercise the fixed bug today), a return
+      to the normal bar after milestone 30's intentional exception. Two
+      throwaway workspaces (created and cleaned up afterward): a
+      `custom` workspace with a non-primary `existing_vpc_id` plus
+      `existing_route_table_ids` in the request, no `deployment.yaml`
+      overrides at all, correctly inferred `routing`/`endpoints`
+      ownership to `"existing"` with `platform.route_table_ids`
+      matching the *requested* ids, not the primary's; a second
+      workspace directly proved the bug fix - explicit
+      `overrides.routing_ownership: existing` on a non-primary VPC with
+      no route tables known anywhere now raises a clear error instead
+      of silently substituting the wrong VPC's route tables. Confirmed
+      `deployment.yaml`'s override still wins over the request value.
+      Confirmed (via the first throwaway) that `tfvars["network"]`
+      correctly contains only `strategy`/`architecture`/`requirements`
+      - no leaked passthrough keys. `resolver/check_cidr_allocations.py`
+      re-run clean throughout. No `.tf` file was touched.
+    - This closes the List-2 audit from milestone 28's writeup in
+      full: all four items (route table ids, ownership inference,
+      Databricks-account topology, KMS trust boundary) have now been
+      addressed except the Databricks-account-topology and KMS
+      trust-boundary questions, which were always framed as business/
+      design judgment calls for the user to make, not technical gaps -
+      see milestone 29's writeup for why `databricks.account_id`'s
+      inventory-default design already accommodates the topology
+      question either way.
 
 ## 9. Conventions observed (keep consistent)
 

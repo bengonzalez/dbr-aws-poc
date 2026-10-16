@@ -141,6 +141,13 @@
           "type": "string"
         },
 
+        "existing_route_table_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+
         "requirements": {
           "type": "object",
           "additionalProperties": false,
