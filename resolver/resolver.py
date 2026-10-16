@@ -156,6 +156,12 @@ def resolve_configuration(
 
     # ---------------------------------------------------------
     # Resolve platform network inventory
+    #
+    # Only the region-approval check lives here. Concrete VPC/subnet
+    # values (ids, CIDRs, the subnet_defaults sizing/AZ convention) are
+    # account-specific facts not known until deployment.yaml names the
+    # real AWS account - resolved in resolver/generate_tfvars.py instead,
+    # same boundary as the metastore id / connectivity resolution.
     # ---------------------------------------------------------
 
     aws_inventory = inventory["aws"]
@@ -188,35 +194,6 @@ def resolve_configuration(
             f"AWS region '{region}' is not approved for "
             f"account '{account_id}'."
         )
-
-    network_inventory = region_inventory["networks"].get("primary")
-
-    if network_inventory is None:
-        raise ValueError(
-            f"No primary network is defined for "
-            f"account '{account_id}' and region '{region}'."
-        )
-
-    subnet_inventory = network_inventory["subnets"]["private"]
-
-    subnet_allocation = subnet_inventory.get("allocation")
-
-    if subnet_inventory["ownership"] == "terraform":
-
-        if subnet_allocation is None:
-            raise ValueError(
-                "Terraform-owned private subnets require "
-                "an allocation definition."
-            )
-
-        if (
-            subnet_allocation["count"]
-            != len(subnet_allocation["availability_zones"])
-        ):
-            raise ValueError(
-                "Private subnet allocation count does not match "
-                "the number of availability zones."
-            )
 
     # ---------------------------------------------------------
     # Resolve data classification
@@ -294,6 +271,54 @@ def resolve_configuration(
         governance["catalog_admin_principal"] = catalog_admin_principal
 
     # ---------------------------------------------------------
+    # Resolve network requester input - plain passthroughs, not
+    # resolved against any policy here (same treatment as
+    # governance.catalog_admin_principal above). Which AWS/Databricks
+    # account the workspace runs on (needed to validate/resolve these
+    # against the platform inventory) isn't known until deployment.yaml
+    # names it, so that resolution happens in
+    # resolver/generate_tfvars.py, not here. All optional: a request
+    # naming none of these just leaves them for generate_tfvars.py's own
+    # defaults (inventory lookups / explicit deployment.yaml overrides).
+    # ---------------------------------------------------------
+
+    request_network = request.get("network", {})
+
+    network = {
+        "strategy": network_strategy,
+        "architecture": network_strategy_config["architecture"],
+        "connectivity": request_network.get("connectivity", "auto"),
+
+        "requirements": {
+            "vpc": {
+                "ownership": network_resources["vpc"]["ownership"],
+            },
+
+            "subnets": {
+                "ownership": network_resources["subnets"]["ownership"],
+            },
+
+            "routing": {
+                "ownership": network_resources["routing"]["ownership"],
+            },
+
+            "security_groups": {
+                "ownership": (
+                    network_resources["security_groups"]["ownership"]
+                ),
+            },
+
+            "endpoints": {
+                "ownership": network_resources["endpoints"]["ownership"],
+            },
+        },
+    }
+
+    for key in ("vpc_cidr", "existing_vpc_id", "existing_vpc_cidr"):
+        if key in request_network:
+            network[key] = request_network[key]
+
+    # ---------------------------------------------------------
     # Build normalized configuration
     # ---------------------------------------------------------
 
@@ -316,53 +341,7 @@ def resolve_configuration(
 
         "ownership": request["ownership"],
 
-        "network": {
-            "strategy": network_strategy,
-            "architecture": network_strategy_config["architecture"],
-
-            # Plain passthrough, not resolved against any policy - same
-            # treatment as governance.catalog_admin_principal. Which
-            # Databricks account the workspace runs on (needed to check
-            # whether "privatelink" is actually available) isn't known
-            # until deployment.yaml names it, so that check happens in
-            # resolver/generate_tfvars.py, not here.
-            "connectivity": request.get("network", {}).get(
-                "connectivity", "auto"
-            ),
-
-            "requirements": {
-                "vpc": {
-                    "ownership": network_resources["vpc"]["ownership"],
-                },
-
-                "subnets": {
-                    "ownership": network_resources["subnets"]["ownership"],
-
-                    "allocation": {
-                        "source": "platform",
-                        "count": subnet_allocation["count"],
-                        "availability_zones": (
-                            subnet_allocation["availability_zones"]
-                        ),
-                        "cidr_source": subnet_allocation["cidr_source"],
-                    },
-                },
-
-                "routing": {
-                    "ownership": network_resources["routing"]["ownership"],
-                },
-
-                "security_groups": {
-                    "ownership": (
-                        network_resources["security_groups"]["ownership"]
-                    ),
-                },
-
-                "endpoints": {
-                    "ownership": network_resources["endpoints"]["ownership"],
-                },
-            },
-        },
+        "network": network,
 
         "data": {
             "classification": data_classification,

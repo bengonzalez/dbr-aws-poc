@@ -173,6 +173,21 @@
             "auto"
           ],
           "description": "How isolated-strategy classic compute reaches the Databricks control plane. 'privatelink' requires an Enterprise-tier Databricks account (rejected otherwise); 'nat' always builds a NAT Gateway; 'auto' (default if omitted) picks PrivateLink when the target Databricks account supports it, NAT otherwise. Moot for 'custom' strategy workspaces reusing an existing VPC's own connectivity."
+        },
+
+        "vpc_cidr": {
+          "type": "string",
+          "description": "CIDR block for a new, dedicated VPC. Required for 'isolated' strategy (or any workspace whose VPC ownership otherwise resolves to 'terraform') - this is the client's own address-space choice, not an operator- or platform-invented value. Checked for pool containment/collisions by resolver/check_cidr_allocations.py. Ignored for 'custom' strategy workspaces reusing an existing VPC."
+        },
+
+        "existing_vpc_id": {
+          "type": "string",
+          "description": "ID of an existing VPC the client is handing over for 'custom' strategy. Optional - when omitted, the AWS account's known 'primary' network (platform/inventory/aws.yaml) is used by default, same as today."
+        },
+
+        "existing_vpc_cidr": {
+          "type": "string",
+          "description": "CIDR block of the VPC named by existing_vpc_id, needed only when that VPC is not already known in platform/inventory/aws.yaml - lets subnet auto-allocation know the address space to carve from. Ignored if the VPC is already known in inventory."
         }
       },
 

@@ -70,6 +70,24 @@ aws:
         us-east-1:
           approved: true
 
+          # Region-level convention for auto-carving subnets out of
+          # WHICHEVER VPC a workspace ends up using - the account's own
+          # "primary" VPC below, a client-provided existing VPC named by
+          # a request's network.existing_vpc_id, or a fresh isolated VPC
+          # created from a request's network.vpc_cidr. AZs are a region
+          # property, not a VPC property, so this lives here rather than
+          # nested under any one VPC. Subnet count is simply
+          # len(availability_zones) - no separate count field needed.
+          # Consumed by resolver/generate_tfvars.py's subnet
+          # auto-allocation (CLAUDE.md §8 milestone 28); resolver.py
+          # itself never reads this (same account-blind boundary as
+          # vpc.id/route_table_ids/metastore_id below).
+          subnet_defaults:
+            prefix_length: 24
+            availability_zones:
+              - us-east-1a
+              - us-east-1b
+
           networks:
 
             primary:
@@ -85,20 +103,6 @@ aws:
                 ownership: existing
                 id: vpc-60c2a81d
                 cidr: 172.31.0.0/16
-
-              subnets:
-
-                private:
-                  ownership: terraform
-
-                  allocation:
-                    count: 2
-
-                    availability_zones:
-                      - us-east-1a
-                      - us-east-1b
-
-                    cidr_source: platform
 
               routing:
                 ownership: existing

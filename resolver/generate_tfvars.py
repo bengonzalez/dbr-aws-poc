@@ -3,12 +3,19 @@ import argparse
 import json
 
 from loader import load_yaml
-from check_cidr_allocations import check_all as check_cidr_allocations
+from check_cidr_allocations import (
+    check_all as check_cidr_allocations,
+    used_subnets_for_scope,
+    vpc_scope,
+)
 from inventory import (
+    allocate_subnets,
     require,
     resolve_connectivity,
+    resolve_existing_vpc_cidr,
     resolve_metastore_id,
     resolve_platform_network,
+    subnet_defaults_for,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,6 +33,188 @@ KMS_PASSTHROUGH_KEYS = (
     "existing_managed_services_key_arn",
     "existing_managed_services_key_alias",
 )
+
+
+def resolve_network_ownership(normalized: dict, overrides: dict) -> tuple[str, str, str]:
+    """
+    Mirror the coalesce() logic in
+    modules/workspace-deployment/locals.tf (override, falling back to
+    the strategy's default) for the three ownership flags that matter
+    to subnet/connectivity resolution. Shared by ensure_subnet_allocation()
+    and build_tfvars() so the two can't drift apart.
+
+    Returns (vpc_ownership, routing_ownership, endpoints_ownership).
+    """
+
+    network_strategy = normalized["network"]["strategy"]
+    default = "terraform" if network_strategy == "isolated" else "existing"
+
+    return (
+        overrides.get("vpc_ownership") or default,
+        overrides.get("routing_ownership") or default,
+        overrides.get("endpoints_ownership") or default,
+    )
+
+
+def ensure_subnet_allocation(
+    workspace_name: str,
+    normalized: dict,
+    deployment: dict,
+    inventory: dict,
+    deployment_dir: Path,
+) -> dict:
+    """
+    Guarantee `deployment["network"]["subnets"]["private"]` is populated
+    before build_tfvars() needs it, auto-allocating it when the operator
+    hasn't hand-typed one (CLAUDE.md §8 milestone 28).
+
+    Three cases, checked in order:
+    1. deployment.yaml already defines network.subnets.private (today's
+       hand-maintained case) - return deployment unchanged. This is the
+       entire backward-compatibility guarantee: every workspace that
+       predates this feature never enters the new code path below.
+    2. infrastructure/deployments/<env>/<name>/allocated-subnets.yaml
+       already exists (pinned by a prior run of this function) - load
+       and merge it in, unchanged from whatever was first computed.
+       Never recomputed - see the module docstring on
+       inventory.allocate_subnets() for why recomputing on every run
+       would be unsafe once a workspace is actually applied.
+    3. Neither exists yet - this is the first time this workspace has
+       been generated. Resolve the VPC CIDR to carve from (request's
+       vpc_cidr/existing_vpc_id/existing_vpc_cidr, or deployment.yaml's
+       own override - same three-tier precedence as
+       resolve_platform_network()), look up this account/region's
+       subnet_defaults convention, gather every other committed
+       workspace's already-used ranges in the same VPC scope, allocate,
+       write the result to allocated-subnets.yaml, and merge it in.
+    """
+
+    network = deployment.get("network", {})
+
+    if network.get("subnets", {}).get("private"):
+        return deployment
+
+    allocated_path = deployment_dir / "allocated-subnets.yaml"
+
+    if allocated_path.exists():
+        allocated_network = load_yaml(allocated_path).get("network", {})
+    else:
+        overrides = deployment.get("overrides", {})
+        vpc_ownership, routing_ownership, endpoints_ownership = (
+            resolve_network_ownership(normalized, overrides)
+        )
+
+        aws_account_id = normalized["cloud"]["account"]
+        region = normalized["cloud"]["region"]
+        normalized_network = normalized.get("network", {})
+
+        if vpc_ownership == "terraform":
+            vpc_cidr = network.get("vpc_cidr") or normalized_network.get("vpc_cidr")
+
+            require(
+                bool(vpc_cidr),
+                "VPC ownership resolves to 'terraform', but no VPC CIDR is "
+                "known - supply 'network.vpc_cidr' in the workspace "
+                "request (the client's own address-space choice), or set "
+                "it explicitly in this workspace's deployment file to "
+                "override.",
+            )
+        else:
+            requested_vpc_id = normalized_network.get("existing_vpc_id")
+            requested_vpc_cidr = normalized_network.get("existing_vpc_cidr")
+
+            vpc_cidr = resolve_existing_vpc_cidr(
+                aws_account_id,
+                region,
+                deployment,
+                inventory,
+                requested_vpc_id,
+                requested_vpc_cidr,
+            )
+
+            require(
+                bool(vpc_cidr),
+                "Could not determine the existing VPC's CIDR block needed "
+                "to auto-allocate subnets - supply "
+                "'network.existing_vpc_cidr' in the workspace request (or "
+                "'platform.vpc_cidr' in this workspace's deployment file) "
+                "if the VPC named by existing_vpc_id isn't already known "
+                "in platform/inventory/aws.yaml.",
+            )
+
+        subnet_defaults = subnet_defaults_for(aws_account_id, region, inventory)
+
+        require(
+            bool(subnet_defaults.get("availability_zones"))
+            and subnet_defaults.get("prefix_length") is not None,
+            f"No 'subnet_defaults' (prefix_length + availability_zones) "
+            f"is declared for AWS account '{aws_account_id}' region "
+            f"'{region}' in platform/inventory/aws.yaml - needed to "
+            f"auto-allocate subnets.",
+        )
+
+        if vpc_ownership == "terraform" or endpoints_ownership == "terraform":
+            databricks_account_id = deployment.get("databricks", {}).get(
+                "account_id"
+            )
+
+            _, nat_needed = resolve_connectivity(
+                databricks_account_id,
+                inventory,
+                normalized_network.get("connectivity", "auto"),
+            )
+
+            nat_needed = nat_needed and vpc_ownership == "terraform"
+        else:
+            nat_needed = False
+
+        scope_key, _ = vpc_scope(workspace_name, deployment, normalized, inventory)
+        used_ranges = used_subnets_for_scope(scope_key, exclude_workspace=workspace_name)
+
+        private_subnets, nat_subnet_cidr = allocate_subnets(
+            vpc_cidr,
+            subnet_defaults["prefix_length"],
+            subnet_defaults["availability_zones"],
+            used_ranges,
+            nat_needed,
+        )
+
+        allocated_network = {"subnets": {"private": private_subnets}}
+
+        if nat_subnet_cidr is not None:
+            allocated_network["nat_subnet_cidr"] = nat_subnet_cidr
+
+        allocated_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with allocated_path.open("w", encoding="utf-8") as file:
+            file.write(
+                "# AUTO-GENERATED by resolver/generate_tfvars.py's "
+                "ensure_subnet_allocation() on first run for this "
+                "workspace - do not hand-edit (same convention as "
+                "terraform.tfvars.json/backend.tfbackend). Pinned "
+                "permanently once written: regenerating tfvars for THIS "
+                "workspace will not recompute these values, so adding a "
+                "sibling workspace later can never shift a subnet CIDR "
+                "already in use by a real, applied deployment. To force "
+                "reallocation (e.g. before first apply), delete this "
+                "file and re-run generate_tfvars.py.\n"
+            )
+            json.dump({"network": allocated_network}, file, indent=2)
+            file.write("\n")
+
+    merged_network = dict(network)
+    merged_network["subnets"] = dict(network.get("subnets", {}))
+    merged_network["subnets"]["private"] = allocated_network.get("subnets", {}).get(
+        "private"
+    )
+
+    if "nat_subnet_cidr" in allocated_network:
+        merged_network.setdefault("nat_subnet_cidr", allocated_network["nat_subnet_cidr"])
+
+    merged_deployment = dict(deployment)
+    merged_deployment["network"] = merged_network
+
+    return merged_deployment
 
 
 def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
@@ -50,32 +239,35 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
         isinstance(private_subnets, list) and len(private_subnets) >= 2,
         "Deployment file must define at least two entries under "
         "'network.subnets.private' (each with 'cidr' and "
-        "'availability_zone').",
+        "'availability_zone') - or, for a new workspace, supply "
+        "'network.vpc_cidr'/'existing_vpc_id' in the workspace request "
+        "so resolver/generate_tfvars.py's ensure_subnet_allocation() can "
+        "auto-allocate them.",
     )
 
     # Required whenever VPC ownership resolves to 'terraform' - whether by
     # the 'isolated' strategy's own default or by an explicit override. Not
     # nested under 'overrides': it isn't an override, it's always needed
     # once Terraform is the one creating the VPC.
-    vpc_cidr = deployment_network.get("vpc_cidr")
+    vpc_cidr = deployment_network.get("vpc_cidr") or normalized["network"].get(
+        "vpc_cidr"
+    )
 
     network = dict(normalized["network"])
     requirements = dict(network["requirements"])
     subnets = dict(requirements["subnets"])
-
-    # 'allocation' describes a strategy (count/AZs/cidr_source), not a
-    # Terraform input - only 'ownership' and the concrete 'private' list are.
-    subnets.pop("allocation", None)
     subnets["private"] = private_subnets
 
     requirements["subnets"] = subnets
     network["requirements"] = requirements
 
-    # connectivity (privatelink/nat/auto) is resolved separately below into
-    # privatelink_enabled_override/nat_enabled_override - var.network's
-    # object type doesn't declare it, since it's consumed as its own
+    # connectivity/vpc_cidr/existing_vpc_id/existing_vpc_cidr are all
+    # resolved separately (into privatelink_enabled_override/
+    # nat_enabled_override/vpc_cidr/platform below) - var.network's object
+    # type doesn't declare any of them, since each is consumed as its own
     # standalone variable, not threaded through the network object itself.
-    network.pop("connectivity", None)
+    for key in ("connectivity", "vpc_cidr", "existing_vpc_id", "existing_vpc_cidr"):
+        network.pop(key, None)
 
     tfvars = {
         "databricks_account_id": databricks_account_id,
@@ -107,20 +299,10 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
 
     overrides = deployment.get("overrides", {})
 
-    # Mirrors the coalesce() logic in modules/workspace-deployment/locals.tf
-    # (override, falling back to the strategy's default) - needed here only
-    # to know whether platform.vpc_id/route_table_ids are actually required,
-    # not to decide any Terraform behavior itself.
-    network_strategy = normalized["network"]["strategy"]
-
-    vpc_ownership = overrides.get("vpc_ownership") or (
-        "terraform" if network_strategy == "isolated" else "existing"
-    )
-    routing_ownership = overrides.get("routing_ownership") or (
-        "terraform" if network_strategy == "isolated" else "existing"
-    )
-    endpoints_ownership = overrides.get("endpoints_ownership") or (
-        "terraform" if network_strategy == "isolated" else "existing"
+    # Needed here only to know whether platform.vpc_id/route_table_ids are
+    # actually required, not to decide any Terraform behavior itself.
+    vpc_ownership, routing_ownership, endpoints_ownership = (
+        resolve_network_ownership(normalized, overrides)
     )
 
     platform = resolve_platform_network(
@@ -130,6 +312,7 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
         inventory,
         need_vpc=vpc_ownership == "existing",
         need_routing=routing_ownership == "existing",
+        requested_vpc_id=normalized["network"].get("existing_vpc_id"),
     )
 
     if platform:
@@ -296,6 +479,15 @@ def main() -> None:
 
     # Check this (and every other committed workspace's) CIDR allocations
     # for collisions before generating anything Terraform would act on.
+    check_cidr_allocations()
+
+    deployment = ensure_subnet_allocation(
+        args.workspace, normalized, deployment, inventory, deployment_dir
+    )
+
+    # Re-check after a first-time allocation writes a new
+    # allocated-subnets.yaml - defensive re-validation, cheap, consistent
+    # with how this check is already treated as the authority.
     check_cidr_allocations()
 
     tfvars = build_tfvars(normalized, deployment, inventory)

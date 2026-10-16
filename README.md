@@ -50,9 +50,11 @@ requester having to specify any AWS-level details themselves.
 │   │   └── <env>/<name>/            #   kept separate from workspace-requests/ (requester-facing
 │   │       ├── deployment.yaml      #   input) and infrastructure/workspace/ (shared TF root)
 │   │       ├── terraform.tfvars.json#   deployment.yaml: committed, hand-maintained (existing
-│   │       └── backend.tfbackend    #   resource ids, concrete subnet CIDRs, overrides).
-│   │                                #   terraform.tfvars.json / backend.tfbackend (the per-
-│   │                                #   workspace `key` line only): GENERATED - never hand-edit.
+│   │       ├── backend.tfbackend    #   resource ids, overrides - subnet CIDRs now optional).
+│   │       └── allocated-subnets.yaml# terraform.tfvars.json / backend.tfbackend / allocated-
+│   │                                #   subnets.yaml (only created if subnets were auto-
+│   │                                #   carved, pinned once written): GENERATED - never
+│   │                                #   hand-edit.
 │   │
 │   ├── nonprod/poc/                 # Frozen original proof of concept - reference only
 │   ├── platform/                    # Reserved, empty (no shared/cross-workspace state exists)
@@ -103,6 +105,22 @@ Run these from the repository root unless noted otherwise.
    (application, environment, owner, cost center, data classification,
    network strategy). See existing files in that directory for examples.
 
+   **For `isolated` strategy**, also supply `network.vpc_cidr` — the CIDR
+   block for your new, dedicated VPC. This is **your** choice as the
+   requester (your network team's address-space allocation), not
+   something an operator invents — it must fall inside the reserved
+   range declared in `platform/inventory/aws.yaml`'s
+   `cidr_pools.isolated_vpc_pool`, checked automatically. You do **not**
+   need to pick subnet ranges — the platform carves them automatically.
+
+   **For `custom` strategy**, if you're handing over your own existing
+   VPC (rather than using the account's default one), supply
+   `network.existing_vpc_id`, plus `network.existing_vpc_cidr` if that
+   VPC isn't already known to the platform (`platform/inventory/aws.yaml`).
+   Again, you do not need to pick subnet ranges yourself — they're
+   auto-carved out of the VPC's address space, avoiding every range
+   already claimed by another committed workspace sharing that VPC.
+
 2. **Resolve it.**
    ```
    python resolver/main.py --request workspace-requests/<env>/<name>.yaml --account <aws_account_id>
@@ -111,21 +129,20 @@ Run these from the repository root unless noted otherwise.
 
 3. **Write the deployment file.** Create
    `infrastructure/deployments/<env>/<name>/deployment.yaml` with the
-   handful of concrete values the resolver doesn't produce: existing VPC id
-   / route table ids (if reusing an existing network), concrete subnet
-   CIDRs, and any per-resource ownership overrides or bring-your-own-key
-   settings. Copy an existing workspace's `deployment.yaml` as a starting
-   template.
+   handful of concrete values the resolver doesn't produce: existing VPC
+   id / route table ids (if reusing a *different* existing network than
+   your request named), any per-resource ownership overrides or
+   bring-your-own-key settings. Copy an existing workspace's
+   `deployment.yaml` as a starting template.
 
-   **Picking CIDRs**: for a brand-new dedicated VPC (`isolated` strategy),
-   pick an unused `/16` inside the reserved range declared in
-   `platform/inventory/aws.yaml`'s `cidr_pools.isolated_vpc_pool`, then
-   subnet ranges inside it. For an existing VPC (`custom` strategy), pick
-   subnet ranges that fit inside that VPC's real CIDR and don't collide
-   with any other workspace already using it (and record that VPC's CIDR
-   under `platform.vpc_cidr` so the next step can check containment).
-   This is still a manual choice, not automatic allocation — see the next
-   step for how collisions get caught.
+   **Subnet CIDRs are now optional here** — if you leave
+   `network.subnets.private` out, the next step auto-carves and
+   permanently pins them for you (based on your request's `vpc_cidr`/
+   `existing_vpc_id`/`existing_vpc_cidr` and the fixed subnet-sizing/AZ
+   convention declared in `platform/inventory/aws.yaml`'s
+   `subnet_defaults`). You can still hand-type explicit subnet CIDRs here
+   if you need to override the auto-carved result for a specific
+   workspace — an explicit list always wins.
 
 4. **Generate the Terraform inputs.**
    ```
@@ -134,9 +151,13 @@ Run these from the repository root unless noted otherwise.
    ```
    `generate_tfvars.py` first runs `resolver/check_cidr_allocations.py`
    against every committed workspace's `deployment.yaml` and fails loudly
-   if the CIDRs you just picked overlap another workspace's VPC/subnets or
-   fall outside the reserved isolated-VPC pool — fix `deployment.yaml` and
-   re-run if so. Produces `infrastructure/deployments/<env>/<name>/terraform.tfvars.json`
+   on any collision or pool violation. If `deployment.yaml` didn't specify
+   subnet CIDRs, it then auto-allocates them (writing a new, generated
+   `infrastructure/deployments/<env>/<name>/allocated-subnets.yaml` —
+   **do not hand-edit this file; delete it to force reallocation before
+   first apply**, since it's permanently pinned on every run afterward)
+   and re-runs the collision check once more before writing tfvars.
+   Produces `infrastructure/deployments/<env>/<name>/terraform.tfvars.json`
    and `.../backend.tfbackend` (just this workspace's state `key`), and
    (re)writes `infrastructure/workspace/backend.tfbackend` (the
    bucket/region/use_lockfile settings shared by every workspace).
@@ -237,10 +258,13 @@ Run these from the repository root unless noted otherwise.
   `network.connectivity: "nat"` or `"privatelink"` explicitly in the
   request to force one or the other; an explicit `"privatelink"` against
   an account without it is rejected with a clear error. NAT only applies
-  to `isolated`-strategy workspaces (Terraform creates the VPC) — it
-  also needs a `network.nat_subnet_cidr` in `deployment.yaml`, same shape
-  as the private subnet CIDRs. A NAT Gateway has a real, ongoing AWS
-  hourly cost — review the plan before applying for that reason too.
+  to workspaces where Terraform creates the VPC itself — its public
+  subnet CIDR is auto-carved alongside the private subnets whenever
+  `deployment.yaml` doesn't hand-type its own `network.subnets.private`
+  (see step 3/4 above); if you do hand-type subnets, you also need to
+  hand-type a `network.nat_subnet_cidr`, same shape as the private subnet
+  CIDRs. A NAT Gateway has a real, ongoing AWS hourly cost — review the
+  plan before applying for that reason too.
 - **Manual deployment doesn't scale past a handful of workspaces.** It's
   fine for testing and for standing up the pipeline itself, but the
   per-workspace-backend-selection discipline above depends entirely on

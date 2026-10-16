@@ -114,15 +114,15 @@ requirements, security controls, Terraform behavior.
 | Path | Status | Notes |
 |---|---|---|
 | `workspace-requests/{dev,stage,live}/` | Working | Minimal requester input YAML. One `document-ai` request per env exists as the test case. |
-| `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`, `validate_deployment.py`, `inventory.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `inventory.py` (**new**, §8 milestone 25) holds shared `platform/inventory/aws.yaml` lookups (`resolve_metastore_id()`, `find_primary_network()`, `resolve_platform_network()`) — centralized here, not in `generate_tfvars.py`, specifically to avoid a circular import with `check_cidr_allocations.py`. `generate_tfvars.py` turns normalized + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/<env>/<name>/` (§8 milestone 13); its metastore and VPC/route-table lookups both come from `inventory.py` (§8 milestones 23, 25). `generate_backend_config.py` turns `normalized/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (§8 milestones 14, 25) scans every committed `deployment.yaml` for CIDR collisions/pool violations, now also falling back to `inventory.py`'s lookup when a workspace's `deployment.yaml` omits `platform.vpc_id` entirely; called automatically by `generate_tfvars.py` before it writes tfvars. `validate_deployment.py` (§8 milestones 23-24) checks a *deployed* workspace's live AWS/Databricks state against what was resolved for it — run manually, post-apply, not wired into anything automatically; its optional `--workspace-profile` additionally verifies live catalog isolation/storage via a workspace-scoped profile (§8 milestone 24). See §5 gaps. |
-| `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. `workspace-request.schema.json` gained an optional `governance.catalog_admin_principal` (§8 milestone 22) — the first requester-controlled `governance` field; every other `governance.*` value is policy/profile-derived — and an optional `network.connectivity` (§8 milestone 27, mirrored into `normalized-config.schema.json` too). No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. |
+| `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`, `validate_deployment.py`, `inventory.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `inventory.py` holds shared `platform/inventory/aws.yaml` lookups (`resolve_metastore_id()`, `find_primary_network()`, `resolve_platform_network()`, `subnet_defaults_for()`, `allocate_subnets()`, `resolve_existing_vpc_cidr()` — the last three added §8 milestone 28) — centralized here, not in `generate_tfvars.py`, specifically to avoid a circular import with `check_cidr_allocations.py`. `generate_tfvars.py` turns normalized + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/<env>/<name>/` (§8 milestone 13); its metastore and VPC/route-table lookups both come from `inventory.py` (§8 milestones 23, 25); its new `ensure_subnet_allocation()` (§8 milestone 28) auto-carves and permanently pins subnet CIDRs into a sibling generated `allocated-subnets.yaml` file whenever a workspace's `deployment.yaml` doesn't hand-type its own `network.subnets.private`. `generate_backend_config.py` turns `normalized/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (§8 milestones 14, 25, 28) scans every committed `deployment.yaml` for CIDR collisions/pool violations, falling back to `inventory.py`'s lookup when a workspace's `deployment.yaml` omits `platform.vpc_id`, and (§8 milestone 28) merging in a workspace's `allocated-subnets.yaml` and the request's own `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` passthroughs when present; exposes `vpc_scope()`/`used_subnets_for_scope()` for `generate_tfvars.py`'s allocator to reuse; called automatically by `generate_tfvars.py` before (and after a first-time allocation) it writes tfvars. `validate_deployment.py` (§8 milestones 23-24) checks a *deployed* workspace's live AWS/Databricks state against what was resolved for it — run manually, post-apply, not wired into anything automatically; its optional `--workspace-profile` additionally verifies live catalog isolation/storage via a workspace-scoped profile (§8 milestone 24). See §5 gaps. |
+| `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. `workspace-request.schema.json` gained an optional `governance.catalog_admin_principal` (§8 milestone 22) — the first requester-controlled `governance` field; every other `governance.*` value is policy/profile-derived — and optional `network.connectivity` (§8 milestone 27) / `network.vpc_cidr` / `network.existing_vpc_id` / `network.existing_vpc_cidr` (§8 milestone 28), all mirrored into `normalized-config.schema.json` too. The latter's now-dead `network.requirements.subnets.allocation` sub-schema (count/AZs/cidr_source — superseded by real auto-allocation, §8 milestone 28) was removed. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. |
 | `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely — `policies/network.yaml`'s `allowed_strategies` is now the only thing with an opinion on network strategy per environment (§8 milestone 16). |
 | `policies/policies.yaml` | Working | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping + per-environment `allowed_strategies`, validation blocking per env), one key per domain (`network_policy`, `security_policy`, `data_policy`, `governance_policy`, `validation_policy`). Trimmed to only the fields `resolver.py` actually reads (§8 milestone 15), gained `network_policy.allowed_strategies` (§8 milestone 16), then merged from five separate files into this one 2026-10-14 (§8 milestone 18 — closes §5.13's config-layer complexity review). |
-| `platform/inventory/aws.yaml` | Working | Declares the `dev` account's primary network; `vpc.id`/`vpc.cidr` fixed to the real values 2026-10-13 (§8 milestone 14), and now auto-consumed (`vpc.id`/`cidr`, `routing.route_table_ids`) by `generate_tfvars.py`/`check_cidr_allocations.py` via `resolver/inventory.py` (§8 milestone 25) whenever VPC/routing ownership resolves to `"existing"` — `resolver.py` itself still never reads this file's `vpc`/`routing` data, only the subnet `allocation` strategy, by design (see §5.3). Also declares `cidr_pools.isolated_vpc_pool` (§8 milestone 14), a `databricks.accounts.<id>.regions.<region>.metastore_id` section (§8 milestone 20), and a per-account `databricks.accounts.<id>.privatelink_available` fact (§8 milestone 27) — all auto-consumed the same way. |
+| `platform/inventory/aws.yaml` | Working | Declares the `dev` account's primary network; `vpc.id`/`vpc.cidr` fixed to the real values 2026-10-13 (§8 milestone 14), and now auto-consumed (`vpc.id`/`cidr`, `routing.route_table_ids`) by `generate_tfvars.py`/`check_cidr_allocations.py` via `resolver/inventory.py` (§8 milestone 25) whenever VPC/routing ownership resolves to `"existing"` — `resolver.py` itself never reads this file's `vpc`/`routing`/`subnet_defaults` data at all now (see §5.3; its old subnet-allocation read was removed §8 milestone 28). Also declares `cidr_pools.isolated_vpc_pool` (§8 milestone 14), a `databricks.accounts.<id>.regions.<region>.metastore_id` section (§8 milestone 20), a per-account `databricks.accounts.<id>.privatelink_available` fact (§8 milestone 27), and a region-level `subnet_defaults` (`prefix_length` + `availability_zones`, §8 milestone 28, replacing the old per-"primary"-network `subnets.private.allocation` block) used to auto-carve subnets out of *any* VPC in that account/region — all auto-consumed the same way. |
 | `normalized/*.yaml` | Working — **was silently gitignored, now fixed** | Resolver output per workspace request. `CLAUDE.md` previously (incorrectly) stated these were committed; `.gitignore` actually had a stale `normalized/` rule (its own comment called it "the normalized **virtual environment** directory," which doesn't match what's in there) that had been silently excluding every file in this directory from version control. Removed 2026-10-09 — these now will be tracked going forward. |
 | `infrastructure/workspace/*.tf` | **One shared root for every workspace** (§8 milestone 12 — supersedes the per-directory approach from milestone 10) | `providers.tf`/`versions.tf` (the latter has a partial `backend "s3" {}` block — bucket/key/region supplied at `init` time, since Terraform backend blocks can't contain variables), `variables.tf`, `main.tf` (a single `module "deployment"` call into `modules/workspace-deployment`), `outputs.tf` (forwards). No per-workspace copies of any of this — every workspace uses these exact same files; only the `-var-file` and the backend-config differ per workspace. |
 | `infrastructure/workspace/backend.tfbackend` | **Working** (§8 milestone 13) | Committed, idempotently rewritten every time `generate_backend_config.py` runs for *any* workspace: `bucket`/`region`/`use_lockfile` — identical for every workspace, so this stays a single shared file instead of being repeated in each per-workspace backend-config file. Never hand-edit. |
-| `infrastructure/deployments/<env>/<name>/deployment.yaml` / `terraform.tfvars.json` / `backend.tfbackend` | **Working** (§8 milestone 13 — supersedes milestone 12's flat layout inside `infrastructure/workspace/`) | Three small files per workspace, grouped in their own directory (not flat alongside the shared Terraform root), all committed: `deployment.yaml` (hand-maintained — existing resource ids, concrete subnet CIDRs, optional overrides), `terraform.tfvars.json` (generated by `generate_tfvars.py`, do not hand-edit), `backend.tfbackend` (generated by `generate_backend_config.py`, do not hand-edit — just this workspace's state `key`; paired at `init` time with the shared `infrastructure/workspace/backend.tfbackend` above). `document-ai-dev`, `isolated-proof`, and `client-vpc-proof` all have these three files today, but **all three workspaces were destroyed on 2026-10-13** (user's call, clean `terraform destroy` for all three) — these files are kept so any of them can be redeployed later via the same shared root. |
+| `infrastructure/deployments/<env>/<name>/deployment.yaml` / `terraform.tfvars.json` / `backend.tfbackend` / `allocated-subnets.yaml` | **Working** (§8 milestone 13 — supersedes milestone 12's flat layout inside `infrastructure/workspace/`) | Per workspace, grouped in their own directory (not flat alongside the shared Terraform root), all committed: `deployment.yaml` (hand-maintained — existing resource ids, concrete subnet CIDRs, optional overrides — subnet CIDRs are now optional here, see §8 milestone 28), `terraform.tfvars.json` (generated by `generate_tfvars.py`, do not hand-edit), `backend.tfbackend` (generated by `generate_backend_config.py`, do not hand-edit — just this workspace's state `key`; paired at `init` time with the shared `infrastructure/workspace/backend.tfbackend` above), and (§8 milestone 28, only for workspaces using subnet auto-allocation) `allocated-subnets.yaml` — generated once on first run by `generate_tfvars.py`'s `ensure_subnet_allocation()` and never recomputed afterward (do not hand-edit; delete it to force reallocation before first apply). `document-ai-dev`, `isolated-proof`, and `client-vpc-proof` all have explicit subnet lists in `deployment.yaml` today (no `allocated-subnets.yaml` needed/created for any of them — confirmed unaffected by milestone 28), but **all three workspaces were destroyed on 2026-10-13** (user's call, clean `terraform destroy` for all three) — these files are kept so any of them can be redeployed later via the same shared root. |
 | `infrastructure/workspace/local.auto.tfvars` (gitignored) / `local.auto.tfvars.example` (committed) | Working | Holds `databricks_profile`. With one shared root again, either this file or the `TF_VAR_databricks_profile` env var works equally well — both apply globally now, no per-directory copying concern anymore. |
 | `infrastructure/nonprod/poc/` | Frozen POC | The original one-shot POC that validated the approach end-to-end. Not touched going forward; kept for reference. |
 | `infrastructure/platform/` | Empty placeholder, deliberately not pursued yet | Would be shared/platform-owned Terraform state used by multiple workspaces. Considered for a shared KMS key during an earlier architecture review and explicitly rejected — every workspace creates and owns its own KMS key(s) in its own state (own S3 key, now). Revisit only if a real need for cross-workspace sharing shows up. |
@@ -264,6 +264,15 @@ is to set `endpoints_ownership_override = "terraform"` for dev specifically
    the existing "resolver resolves policy, deployment-layer resolves
    concrete ids" boundary. Revisit only if a real need arises for the
    normalized contract itself to carry a resolved VPC id (none has yet).
+   **Nuance added §8 milestone 28**: `normalized/*.yaml` *can* now carry
+   `network.existing_vpc_id`/`existing_vpc_cidr` — but only as an
+   unresolved passthrough of what the *client* supplied in the request
+   (same category as `connectivity`/`catalog_admin_principal`), copied
+   verbatim by `resolver.py` without ever being validated/looked up
+   against the inventory. That resolution still happens only in
+   `generate_tfvars.py`, once the deployment's AWS account is known -
+   this doesn't change the boundary above, it just gives the client a
+   way to state their own existing VPC id instead of only the operator.
 4. **No normalized-YAML → tfvars generator — done, see §8.** `resolver/
    generate_tfvars.py` does this. The old hand-written HCL
    `infrastructure/workspace/dev.tfvars` it superseded was **removed
@@ -1768,6 +1777,96 @@ Priority order agreed on:
       `isolated-proof` remains a separate, explicit go/no-go** — a NAT
       Gateway has a real ongoing AWS hourly cost, not assumed as part of
       this change.
+28. **Client-driven VPC CIDR/id + auto-allocated subnets** (2026-10-15,
+    same day). The user asked directly: who should supply a VPC's CIDR
+    (isolated) or id (custom), and who should pick subnet ranges inside
+    it? Before this milestone, every one of these was hand-typed by the
+    *operator* into `deployment.yaml`, with `check_cidr_allocations.py`
+    only checking for collisions after the fact - nothing allocated
+    anything, and nothing flowed from the requester. Decided via
+    `AskUserQuestion` before building:
+    - **Isolated**: the VPC CIDR is the *client's* own address-space
+      choice - it now flows through `workspace-requests/*.yaml`'s new
+      optional `network.vpc_cidr`, not invented by an operator. Subnets
+      inside that VPC are **not** asked of the client - the platform
+      auto-selects them.
+    - **Custom**: the existing VPC's *id* is likewise the client's to
+      supply (new optional `network.existing_vpc_id`, with an optional
+      `network.existing_vpc_cidr` companion needed only when that VPC
+      isn't already known in `platform/inventory/aws.yaml`). Omitting it
+      keeps today's default (the account's known "primary" network).
+      Subnets here are **also** auto-selected (chosen over keeping this
+      case manual) - same blind spot the manual process already had
+      (can't see non-Terraform-managed resources already living in that
+      VPC), not a new risk, just automated.
+    - Subnet sizing/AZ convention is a **fixed, region-level default**
+      declared once in `platform/inventory/aws.yaml` (new
+      `subnet_defaults`: `prefix_length` + `availability_zones`, replacing
+      the old, dead per-"primary"-network `subnets.private.allocation`
+      block) - not something the requester tunes per workspace.
+    - All three new request fields are plain passthroughs through
+      `resolver.py` (same treatment as `connectivity`/
+      `catalog_admin_principal`) - the real resolution/validation
+      happens in `generate_tfvars.py`, once the deployment's AWS account
+      is known, same boundary as every other account-aware lookup.
+    - **Key technical risk identified and designed around during
+      planning**: naively recomputing "the next free subnet block" on
+      every `generate_tfvars.py` run would be unsafe - adding a sibling
+      workspace later (sharing a VPC, or just sharing the collision
+      scanner) could shift an *already-applied* workspace's subnet CIDRs
+      on its next regen, which Terraform would then try to destroy/
+      recreate. Fixed by allocating once and **permanently pinning** the
+      result to a new generated, committed file
+      (`infrastructure/deployments/<env>/<name>/allocated-subnets.yaml`)
+      - never recomputed once it exists, same spirit as
+      `terraform.tfvars.json` itself never silently drifting.
+    - **Zero Terraform changes** - `modules/workspace-network`'s
+      `private_subnets`/`nat_subnet_cidr` variables were already plain
+      list/string inputs; this entire feature lives in the Python config
+      layer (`resolver/inventory.py`'s new `allocate_subnets()`/
+      `subnet_defaults_for()`/`resolve_existing_vpc_cidr()`;
+      `resolver/check_cidr_allocations.py`'s now-public `vpc_scope()`/
+      new `used_subnets_for_scope()`, plus merging a workspace's
+      `allocated-subnets.yaml` into its effective deployment for every
+      future collision check; `resolver/generate_tfvars.py`'s new
+      `ensure_subnet_allocation()` and shared `resolve_network_ownership()`
+      helper, called in `main()` before `build_tfvars()`).
+    - `resolver.py`'s old, dead subnet-allocation-validation block (it
+      read `platform/inventory/aws.yaml`'s per-account subnet allocation
+      purely to populate an informational `normalized.network.
+      requirements.subnets.allocation` field that `generate_tfvars.py`
+      already discarded) was removed - superseded by the real allocation
+      logic, continuing the same pattern as milestones 20/25/27 (concrete,
+      account-aware resolution moves out of `resolver.py` as it matures).
+    - **Backward compatibility guarantee, verified**: all three real
+      `deployment.yaml` files (`document-ai-dev`, `isolated-proof`,
+      `client-vpc-proof`) already have explicit `network.subnets.private`
+      lists, so `ensure_subnet_allocation()`'s first check
+      (`deployment.yaml` already defines them → return unchanged) means
+      none of them ever enters the new code path. Confirmed by
+      regenerating all three workspaces' `terraform.tfvars.json` -
+      byte-identical, and no `allocated-subnets.yaml` created for any of
+      them.
+    - Verified via four throwaway workspaces (created and fully cleaned
+      up afterward, same pattern as every prior milestone): an isolated
+      workspace with only a request-supplied `vpc_cidr` correctly got
+      carved `/24` private subnets plus a NAT subnet (its Databricks
+      account has no PrivateLink, so `connectivity` resolved to NAT);
+      two custom-strategy workspaces sharing the same (fabricated, not
+      inventory-known) `existing_vpc_id` + `existing_vpc_cidr` correctly
+      got non-overlapping ranges from each other; a third, alphabetically
+      *earlier* workspace added afterward into the same shared VPC
+      correctly avoided both already-claimed ranges *and* left the first
+      two's already-pinned `allocated-subnets.yaml` files byte-identical
+      after being regenerated again - directly confirming the stability
+      guarantee above. Also confirmed the rejection paths: a request's
+      `vpc_cidr` outside the reserved isolated-VPC pool, a missing
+      `vpc_cidr` for an isolated-resolving workspace, and a missing
+      `existing_vpc_cidr` for a custom VPC unknown to inventory all fail
+      with clear, specific errors.
+    - No real `terraform apply`/`plan` against live infrastructure was
+      implicated - this is a config-generation-time feature; the three
+      real workspaces' tfvars are proven unchanged above.
 
 ## 9. Conventions observed (keep consistent)
 
