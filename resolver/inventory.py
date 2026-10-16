@@ -147,6 +147,52 @@ def find_primary_network(aws_account_id: str, region: str, inventory: dict) -> d
     )
 
 
+def route_table_ids_known(
+    aws_account_id: str,
+    region: str,
+    deployment: dict,
+    inventory: dict,
+    requested_vpc_id: str | None,
+) -> bool:
+    """
+    Whether route table ids are actually known for the effective VPC a
+    workspace is reusing - the signal routing_ownership is now inferred
+    from (CLAUDE.md §8 milestone 30), instead of a blind per-strategy
+    default or a manual override.
+
+    True when deployment.yaml's 'platform.route_table_ids' is set
+    directly, OR when the effective VPC id (deployment override >
+    requested_vpc_id > unset, same precedence as
+    resolve_platform_network()) is unset or matches the account/region's
+    known 'primary' network's own vpc id AND that primary network
+    declares route tables.
+
+    Fixes a latent gap in resolve_platform_network()'s own inventory
+    fallback: that function returns the primary network's route tables
+    whenever routing ownership is "existing", with no check that the
+    VPC in play is actually the primary one - a different,
+    non-primary existing VPC (e.g. a client-provided one) was never
+    entitled to borrow the primary's route tables. This function is the
+    one that decides ownership in the first place, so it enforces the
+    match itself.
+    """
+
+    deployment_platform = deployment.get("platform") or {}
+
+    if deployment_platform.get("route_table_ids"):
+        return True
+
+    effective_vpc_id = deployment_platform.get("vpc_id") or requested_vpc_id
+
+    primary = find_primary_network(aws_account_id, region, inventory)
+    primary_vpc_id = primary.get("vpc", {}).get("id")
+
+    if effective_vpc_id is not None and effective_vpc_id != primary_vpc_id:
+        return False
+
+    return bool(primary.get("routing", {}).get("route_table_ids"))
+
+
 def subnet_defaults_for(aws_account_id: str, region: str, inventory: dict) -> dict:
     """
     Find the region-level subnet-sizing/AZ convention

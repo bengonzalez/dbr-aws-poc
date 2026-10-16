@@ -16,17 +16,11 @@ from inventory import (
     resolve_existing_vpc_cidr,
     resolve_metastore_id,
     resolve_platform_network,
+    route_table_ids_known,
     subnet_defaults_for,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
-
-OVERRIDE_OWNERSHIP_KEYS = (
-    "vpc_ownership",
-    "routing_ownership",
-    "security_group_ownership",
-    "endpoints_ownership",
-)
 
 KMS_PASSTHROUGH_KEYS = (
     "existing_workspace_storage_key_arn",
@@ -36,25 +30,64 @@ KMS_PASSTHROUGH_KEYS = (
 )
 
 
-def resolve_network_ownership(normalized: dict, overrides: dict) -> tuple[str, str, str]:
+def resolve_network_ownership(
+    normalized: dict, deployment: dict, inventory: dict
+) -> tuple[str, str, str]:
     """
-    Mirror the coalesce() logic in
-    modules/workspace-deployment/locals.tf (override, falling back to
-    the strategy's default) for the three ownership flags that matter
-    to subnet/connectivity resolution. Shared by ensure_subnet_allocation()
-    and build_tfvars() so the two can't drift apart.
+    Resolve vpc/routing/endpoints ownership (CLAUDE.md §8 milestones
+    9, 30). Shared by ensure_subnet_allocation() and build_tfvars() so
+    the two can't drift apart.
+
+    vpc_ownership stays strategy-driven (override > strategy default) -
+    there's no cleaner signal than network.strategy itself; 'custom'
+    legitimately defaults to "existing" even with no explicit
+    existing_vpc_id, via the inventory fallback.
+
+    routing_ownership is now INFERRED rather than defaulted blindly:
+    when Terraform owns the VPC itself, routing is necessarily also
+    "terraform" (nothing existing to reuse - not a choice). Otherwise,
+    it's "existing" only when route table ids are actually known for
+    THIS VPC (inventory.route_table_ids_known()) - not "existing" with
+    nothing to actually reuse. overrides.routing_ownership remains a
+    rare escape hatch on top of this.
+
+    endpoints_ownership defaults to whatever routing_ownership just
+    resolved to: a VPC with no known route tables has, in every real
+    case seen so far, no existing S3/STS/KMS endpoints either
+    (client-vpc-proof's bare VPC) - both signal "this is a genuinely
+    bare VPC," not two independent facts. overrides.endpoints_ownership
+    remains available for the rare case they actually diverge (CLAUDE.md
+    §4 flags document-ai-dev's VPC - existing route tables, but no
+    endpoints today - as a possible future example).
 
     Returns (vpc_ownership, routing_ownership, endpoints_ownership).
     """
 
+    overrides = deployment.get("overrides", {})
     network_strategy = normalized["network"]["strategy"]
-    default = "terraform" if network_strategy == "isolated" else "existing"
 
-    return (
-        overrides.get("vpc_ownership") or default,
-        overrides.get("routing_ownership") or default,
-        overrides.get("endpoints_ownership") or default,
+    vpc_ownership = overrides.get("vpc_ownership") or (
+        "terraform" if network_strategy == "isolated" else "existing"
     )
+
+    if vpc_ownership == "terraform":
+        routing_ownership = overrides.get("routing_ownership") or "terraform"
+    else:
+        aws_account_id = normalized["cloud"]["account"]
+        region = normalized["cloud"]["region"]
+        requested_vpc_id = normalized["network"].get("existing_vpc_id")
+
+        routing_ownership = overrides.get("routing_ownership") or (
+            "existing"
+            if route_table_ids_known(
+                aws_account_id, region, deployment, inventory, requested_vpc_id
+            )
+            else "terraform"
+        )
+
+    endpoints_ownership = overrides.get("endpoints_ownership") or routing_ownership
+
+    return vpc_ownership, routing_ownership, endpoints_ownership
 
 
 def ensure_subnet_allocation(
@@ -100,9 +133,8 @@ def ensure_subnet_allocation(
     if allocated_path.exists():
         allocated_network = load_yaml(allocated_path).get("network", {})
     else:
-        overrides = deployment.get("overrides", {})
         vpc_ownership, routing_ownership, endpoints_ownership = (
-            resolve_network_ownership(normalized, overrides)
+            resolve_network_ownership(normalized, deployment, inventory)
         )
 
         aws_account_id = normalized["cloud"]["account"]
@@ -316,10 +348,8 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
 
     overrides = deployment.get("overrides", {})
 
-    # Needed here only to know whether platform.vpc_id/route_table_ids are
-    # actually required, not to decide any Terraform behavior itself.
     vpc_ownership, routing_ownership, endpoints_ownership = (
-        resolve_network_ownership(normalized, overrides)
+        resolve_network_ownership(normalized, deployment, inventory)
     )
 
     platform = resolve_platform_network(
@@ -338,9 +368,27 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
     if vpc_cidr is not None:
         tfvars["vpc_cidr"] = vpc_cidr
 
-    for key in OVERRIDE_OWNERSHIP_KEYS:
-        if key in overrides:
-            tfvars[f"{key}_override"] = overrides[key]
+    # vpc/routing/endpoints ownership are now always set explicitly from
+    # resolve_network_ownership()'s result (CLAUDE.md §8 milestone 30) -
+    # routing/endpoints are INFERRED, not just passed through from
+    # deployment.yaml's overrides, so silently forwarding only an
+    # explicit override (the old behavior) would let
+    # modules/workspace-deployment/locals.tf's own strategy-only
+    # coalesce() independently (and wrongly) recompute a different
+    # default, diverging from this inference.
+    tfvars["vpc_ownership_override"] = vpc_ownership
+    tfvars["routing_ownership_override"] = routing_ownership
+    tfvars["endpoints_ownership_override"] = endpoints_ownership
+
+    # security_group_ownership has no strategy-based default (always
+    # "terraform" unless overridden), so there's no divergence risk in
+    # only forwarding it when deployment.yaml explicitly sets it - its
+    # own inference (existing_security_group_id's presence) is handled
+    # separately below.
+    if "security_group_ownership" in overrides:
+        tfvars["security_group_ownership_override"] = overrides[
+            "security_group_ownership"
+        ]
 
     # Existing security group id: deployment.yaml override > request's
     # network.existing_security_group_id (CLAUDE.md §8 milestone 29).

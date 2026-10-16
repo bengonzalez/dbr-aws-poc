@@ -6,8 +6,11 @@
 # endpoints.
 #
 # network.strategy is "custom" (vpc_ownership defaults to "existing"), but
-# routing and endpoints default to "existing" under custom too - this
-# client only gave us the VPC itself, so both are overridden to "terraform".
+# routing/endpoints ownership are now INFERRED (CLAUDE.md §8 milestone 30):
+# this VPC isn't the account's known primary network, so no route tables
+# are known for it - routing (and, by default, endpoints) automatically
+# infer "terraform" with no override needed. No overrides block at all
+# anymore.
 #
 # Destroyed 2026-10-13 as part of moving to the shared-root + S3-backend
 # model (CLAUDE.md) - this file is kept so the workspace can be redeployed
@@ -38,10 +41,6 @@ network:
         availability_zone: us-east-1a
       - cidr: 10.80.1.0/24
         availability_zone: us-east-1b
-
-overrides:
-  routing_ownership: terraform
-  endpoints_ownership: terraform
 
 # No privatelink_enabled override needed: this workspace's request never
 # sets network.connectivity, so it defaults to "auto" - which already

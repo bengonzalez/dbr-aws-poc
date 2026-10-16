@@ -43,16 +43,21 @@ network:
       - cidr: 172.31.101.0/24
         availability_zone: us-east-1b
 
-# Optional per-resource ownership overrides (uncomment to deviate from the
-# network.strategy preset for one specific resource). An existing security
-# group id is normally supplied in the workspace request instead
-# (network.existing_security_group_id) - its presence alone implies
-# security_group_ownership "existing", so only vpc/routing/endpoints
-# ownership ever need setting here:
+# Optional per-resource ownership overrides - rarely needed now that
+# routing/endpoints ownership are INFERRED (CLAUDE.md §8 milestone 30):
+# "existing" automatically whenever route table ids are actually known
+# for the VPC in play (this workspace's primary VPC has them, so both
+# already resolve to "existing" with no override at all), "terraform"
+# otherwise - endpoints defaults to whatever routing resolves to. An
+# existing security group id is normally supplied in the workspace
+# request instead (network.existing_security_group_id) - its presence
+# alone implies security_group_ownership "existing" too (§8 milestone
+# 29). This leaves vpc_ownership as the only one that ever commonly
+# needs setting here:
 # overrides:
 #   vpc_ownership: terraform
-#   routing_ownership: terraform
-#   endpoints_ownership: terraform
+#   routing_ownership: terraform    # rare: overrides the inference
+#   endpoints_ownership: terraform  # rare: overrides the inference
 #   existing_security_group_id: sg-xxxxxxxx   # rare: bypasses the request
 
 # Bring-your-own KMS keys are normally supplied in the workspace request
