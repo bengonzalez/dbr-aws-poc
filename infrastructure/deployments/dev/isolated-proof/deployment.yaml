@@ -10,10 +10,16 @@
 
 api_version: v1
 
-databricks:
-  # Second account created specifically to test PrivateLink (requires
-  # Enterprise tier, which the original 331f8702... account doesn't have).
-  account_id: "eddbb85f-6b3c-4261-8ca2-0d9d62575ce2"
+# This workspace's Databricks account (eddbb85f... - the second account
+# created specifically to test PrivateLink/Enterprise tier) is now
+# requested explicitly via workspace-requests/dev/isolated-proof.yaml's
+# cloud.databricks_account_id, instead of being hand-typed here (CLAUDE.md
+# §8 milestone 29) - the AWS account's inventory default is a DIFFERENT
+# account (331f8702...), so this override is genuinely needed, just moved
+# to the request. Nothing needed here unless correcting that request
+# without resubmitting it:
+# databricks:
+#   account_id: "..."
 
 # No "platform" block - the isolated strategy creates its own dedicated VPC,
 # nothing pre-existing to point at.

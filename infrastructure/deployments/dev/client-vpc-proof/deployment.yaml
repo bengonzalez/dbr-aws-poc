@@ -16,10 +16,13 @@
 
 api_version: v1
 
-databricks:
-  # Second account created specifically to test PrivateLink (requires
-  # Enterprise tier, which the original 331f8702... account doesn't have).
-  account_id: "eddbb85f-6b3c-4261-8ca2-0d9d62575ce2"
+# This workspace's Databricks account (eddbb85f...) is now requested
+# explicitly via workspace-requests/dev/client-vpc-proof.yaml's
+# cloud.databricks_account_id, instead of being hand-typed here (CLAUDE.md
+# §8 milestone 29). Nothing needed here unless correcting that request
+# without resubmitting it:
+# databricks:
+#   account_id: "..."
 
 # vpc_cidr is informational only (not passed to Terraform - the VPC already
 # exists) - it lets resolver/check_cidr_allocations.py confirm the subnets
@@ -39,10 +42,14 @@ network:
 overrides:
   routing_ownership: terraform
   endpoints_ownership: terraform
-  # PrivateLink requires Enterprise tier - confirmed unavailable on both
-  # accounts tried. Generic S3/STS endpoints still get built; NAT is a
-  # possible future fallback for full connectivity - see CLAUDE.md TODO.
-  privatelink_enabled: false
+
+# No privatelink_enabled override needed: this workspace's request never
+# sets network.connectivity, so it defaults to "auto" - which already
+# correctly resolves to no-PrivateLink on this Databricks account
+# (platform/inventory/aws.yaml's privatelink_available: false). The
+# overrides.privatelink_enabled: false that used to be here was already
+# redundant before this file was cleaned up (CLAUDE.md §8 milestone 29) -
+# removed, not moved.
 
 # The metastore for this workspace's Databricks account (eddbb85f.../TSA)
 # is looked up automatically from platform/inventory/aws.yaml's

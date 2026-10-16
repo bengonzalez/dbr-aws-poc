@@ -25,6 +25,7 @@ def resolve_metastore_id(
     region: str,
     deployment: dict,
     inventory: dict,
+    requested_metastore_id: str | None = None,
 ) -> str:
     """
     Resolve which Unity Catalog metastore a workspace should be assigned
@@ -32,9 +33,11 @@ def resolve_metastore_id(
     live in platform/inventory/aws.yaml's 'databricks' section, looked up
     automatically so a workspace's deployment.yaml only needs to name its
     Databricks account, not repeat the metastore id every time.
-    'unity_catalog.existing_metastore_id' in deployment.yaml is an
-    optional override for the rare workspace that needs a different
-    metastore. Raises ValueError if neither source has a value.
+
+    Precedence: deployment.yaml's 'unity_catalog.existing_metastore_id'
+    override > the request's governance.existing_metastore_id
+    (requested_metastore_id, CLAUDE.md §8 milestone 29) > the inventory
+    default. Raises ValueError if nothing resolves it.
     """
 
     inventory_metastore_id = (
@@ -50,19 +53,67 @@ def resolve_metastore_id(
         "existing_metastore_id"
     )
 
-    existing_metastore_id = override_metastore_id or inventory_metastore_id
+    existing_metastore_id = (
+        override_metastore_id or requested_metastore_id or inventory_metastore_id
+    )
 
     require(
         bool(existing_metastore_id),
         f"governance.unity_catalog is true, but no metastore is known "
         f"for Databricks account '{databricks_account_id}' region "
         f"'{region}'. Add it to platform/inventory/aws.yaml's "
-        f"'databricks.accounts' section, or set "
-        f"'unity_catalog.existing_metastore_id' explicitly in this "
+        f"'databricks.accounts' section, set "
+        f"'governance.existing_metastore_id' in the workspace request, or "
+        f"set 'unity_catalog.existing_metastore_id' explicitly in this "
         f"workspace's deployment file to override.",
     )
 
     return existing_metastore_id
+
+
+def resolve_databricks_account_id(
+    aws_account_id: str,
+    inventory: dict,
+    requested_databricks_account_id: str | None,
+    override_databricks_account_id: str | None,
+) -> str:
+    """
+    Resolve which Databricks account a workspace registers with: a
+    default lives per-AWS-account in platform/inventory/aws.yaml
+    ('aws.accounts.<name>.databricks_account_id'), looked up
+    automatically so most workspaces never need to name it at all.
+
+    Precedence: deployment.yaml's 'databricks.account_id'
+    (override_databricks_account_id) > the request's
+    cloud.databricks_account_id (requested_databricks_account_id,
+    CLAUDE.md §8 milestone 29) > the inventory default. Raises
+    ValueError if nothing resolves it.
+    """
+
+    inventory_databricks_account_id = None
+
+    for account in inventory.get("aws", {}).get("accounts", {}).values():
+        if account.get("account_id") == aws_account_id:
+            inventory_databricks_account_id = account.get("databricks_account_id")
+            break
+
+    databricks_account_id = (
+        override_databricks_account_id
+        or requested_databricks_account_id
+        or inventory_databricks_account_id
+    )
+
+    require(
+        bool(databricks_account_id),
+        f"No Databricks account is known for AWS account "
+        f"'{aws_account_id}'. Add 'databricks_account_id' to "
+        f"platform/inventory/aws.yaml's 'aws.accounts' section, set "
+        f"'cloud.databricks_account_id' in the workspace request, or set "
+        f"'databricks.account_id' explicitly in this workspace's "
+        f"deployment file to override.",
+    )
+
+    return databricks_account_id
 
 
 def _find_region_inventory(aws_account_id: str, region: str, inventory: dict) -> dict:

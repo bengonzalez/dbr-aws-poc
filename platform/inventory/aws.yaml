@@ -65,6 +65,18 @@ aws:
       account_id: "556940913059"
       environment: dev
 
+      # Default Databricks account workspaces in this AWS account register
+      # with, looked up automatically by resolver/generate_tfvars.py (same
+      # pattern as metastore_id/vpc.id below) - a workspace only needs an
+      # override (request-level cloud.databricks_account_id, or
+      # deployment.yaml's databricks.account_id) for the rare case it must
+      # land in a DIFFERENT Databricks account than this default. This AWS
+      # account also hosts a second, deliberately different Databricks
+      # account (eddbb85f-6b3c-4261-8ca2-0d9d62575ce2, used by
+      # isolated-proof/client-vpc-proof to test PrivateLink/Enterprise-tier
+      # behavior) via that override mechanism - see CLAUDE.md §8 milestone 29.
+      databricks_account_id: "331f8702-2e00-42e9-82e2-2935e7e1d4f9"
+
       regions:
 
         us-east-1:

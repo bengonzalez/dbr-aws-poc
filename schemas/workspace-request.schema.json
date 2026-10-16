@@ -83,6 +83,11 @@
         "region": {
           "type": "string",
           "minLength": 1
+        },
+
+        "databricks_account_id": {
+          "type": "string",
+          "description": "Override the AWS account's default Databricks account (platform/inventory/aws.yaml's 'aws.accounts.<name>.databricks_account_id'). Optional - most workspaces don't need this; it exists for the rare case a workspace must land in a different Databricks account than its AWS account's default."
         }
       },
 
@@ -188,6 +193,11 @@
         "existing_vpc_cidr": {
           "type": "string",
           "description": "CIDR block of the VPC named by existing_vpc_id, needed only when that VPC is not already known in platform/inventory/aws.yaml - lets subnet auto-allocation know the address space to carve from. Ignored if the VPC is already known in inventory."
+        },
+
+        "existing_security_group_id": {
+          "type": "string",
+          "description": "ID of an existing security group the client is handing over, instead of one Terraform creates. Optional - when present, security group ownership automatically resolves to 'existing' (no separate ownership override needed)."
         }
       },
 
@@ -203,6 +213,33 @@
       }
     },
 
+    "encryption": {
+      "type": "object",
+      "additionalProperties": false,
+
+      "properties": {
+        "existing_workspace_storage_key_arn": {
+          "type": "string",
+          "description": "ARN of an existing customer-managed KMS key to use for workspace storage (DBFS/root-bucket/EBS), instead of a dedicated one the platform creates. Only meaningful when encryption.workspace resolves to 'customer_managed' (profile/policy-derived, not requester-controlled). Optional."
+        },
+
+        "existing_workspace_storage_key_alias": {
+          "type": "string",
+          "description": "Alias name of the existing workspace storage key named above, if any."
+        },
+
+        "existing_managed_services_key_arn": {
+          "type": "string",
+          "description": "ARN of an existing customer-managed KMS key to use for Databricks control-plane managed services data, instead of a dedicated one the platform creates. Optional."
+        },
+
+        "existing_managed_services_key_alias": {
+          "type": "string",
+          "description": "Alias name of the existing managed services key named above, if any."
+        }
+      }
+    },
+
     "governance": {
       "type": "object",
       "additionalProperties": false,
@@ -212,6 +249,12 @@
           "type": "string",
           "minLength": 1,
           "description": "A Databricks user name, group name, or service principal application ID to grant ALL_PRIVILEGES on this workspace's Unity Catalog catalog. Optional - omit to leave the catalog ungranted (owner defaults to whoever runs terraform apply)."
+        },
+
+        "existing_metastore_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Override the Unity Catalog metastore this workspace is assigned to, instead of the Databricks account/region's known default (platform/inventory/aws.yaml). Optional - most workspaces don't need this."
         }
       }
     }

@@ -39,7 +39,7 @@ import json
 import subprocess
 
 from loader import load_yaml
-from inventory import resolve_metastore_id
+from inventory import resolve_databricks_account_id, resolve_metastore_id
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKSPACE_ROOT = ROOT / "infrastructure" / "workspace"
@@ -120,6 +120,7 @@ def run_checks(
     normalized: dict,
     deployment: dict,
     inventory: dict,
+    databricks_account_id: str,
     profile: str,
     workspace_profile: str | None = None,
 ) -> list[CheckResult]:
@@ -249,11 +250,14 @@ def run_checks(
     # ---------------------------------------------------------
 
     if normalized["governance"]["unity_catalog"]:
-        databricks_account_id = deployment["databricks"]["account_id"]
         region = normalized["cloud"]["region"]
 
         expected_metastore_id = resolve_metastore_id(
-            databricks_account_id, region, deployment, inventory
+            databricks_account_id,
+            region,
+            deployment,
+            inventory,
+            normalized["governance"].get("existing_metastore_id"),
         )
 
         assignment, error = run_databricks(
@@ -495,8 +499,20 @@ def main() -> int:
     deployment = load_yaml(deployment_path)
     inventory = load_yaml(ROOT / "platform" / "inventory" / "aws.yaml")
 
+    databricks_account_id = resolve_databricks_account_id(
+        normalized["cloud"]["account"],
+        inventory,
+        normalized["cloud"].get("databricks_account_id"),
+        deployment.get("databricks", {}).get("account_id"),
+    )
+
     results = run_checks(
-        normalized, deployment, inventory, args.profile, args.workspace_profile
+        normalized,
+        deployment,
+        inventory,
+        databricks_account_id,
+        args.profile,
+        args.workspace_profile,
     )
 
     print_report(results)

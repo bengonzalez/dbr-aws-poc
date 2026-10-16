@@ -119,7 +119,22 @@ Run these from the repository root unless noted otherwise.
    VPC isn't already known to the platform (`platform/inventory/aws.yaml`).
    Again, you do not need to pick subnet ranges yourself — they're
    auto-carved out of the VPC's address space, avoiding every range
-   already claimed by another committed workspace sharing that VPC.
+   already claimed by another committed workspace sharing that VPC. If
+   you're also handing over an existing security group, supply
+   `network.existing_security_group_id` too — no separate ownership
+   override is needed, its presence is enough.
+
+   **Other optional request fields**, each with a platform-wide default
+   so most workspaces never need them: `cloud.databricks_account_id`
+   (override which Databricks account this workspace registers with —
+   defaults to the AWS account's known default in
+   `platform/inventory/aws.yaml`), `encryption.existing_workspace_storage_key_arn`/
+   `existing_workspace_storage_key_alias`/`existing_managed_services_key_arn`/
+   `existing_managed_services_key_alias` (bring your own KMS keys instead
+   of ones the platform creates — only meaningful once
+   `encryption.workspace` resolves to `customer_managed`), and
+   `governance.existing_metastore_id` (register with a different Unity
+   Catalog metastore than the Databricks account/region's known default).
 
 2. **Resolve it.**
    ```
@@ -127,13 +142,17 @@ Run these from the repository root unless noted otherwise.
    ```
    Produces `normalized/<name>.yaml` — the fully resolved configuration.
 
-3. **Write the deployment file.** Create
-   `infrastructure/deployments/<env>/<name>/deployment.yaml` with the
-   handful of concrete values the resolver doesn't produce: existing VPC
-   id / route table ids (if reusing a *different* existing network than
-   your request named), any per-resource ownership overrides or
-   bring-your-own-key settings. Copy an existing workspace's
-   `deployment.yaml` as a starting template.
+3. **Write the deployment file (usually just an `api_version: v1` stub).**
+   A normal workspace needs **no edits here at all** — every concrete
+   value (Databricks account, VPC/route tables, subnets, security group,
+   KMS keys, metastore) now comes from the request or
+   `platform/inventory/aws.yaml` by default. `deployment.yaml` still
+   exists as the rarely-needed **override** layer, for the one case
+   where an already-submitted request needs correcting without
+   resubmitting it, or a value genuinely varies independently of the
+   request (e.g. reusing a *different* existing network than the
+   request named). Copy an existing workspace's `deployment.yaml` for
+   the commented-out override syntax if you ever need it.
 
    **Subnet CIDRs are now optional here** — if you leave
    `network.subnets.private` out, the next step auto-carves and

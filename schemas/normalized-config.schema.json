@@ -51,6 +51,9 @@
         "account": {
           "type": "string",
           "pattern": "^[0-9]{12}$"
+        },
+        "databricks_account_id": {
+          "type": "string"
         }
       },
       "required": [
@@ -131,6 +134,10 @@
         },
 
         "existing_vpc_cidr": {
+          "type": "string"
+        },
+
+        "existing_security_group_id": {
           "type": "string"
         },
 
@@ -277,6 +284,18 @@
             "platform_managed",
             "customer_managed"
           ]
+        },
+        "existing_workspace_storage_key_arn": {
+          "type": "string"
+        },
+        "existing_workspace_storage_key_alias": {
+          "type": "string"
+        },
+        "existing_managed_services_key_arn": {
+          "type": "string"
+        },
+        "existing_managed_services_key_alias": {
+          "type": "string"
         }
       },
       "required": [
@@ -301,6 +320,10 @@
           ]
         },
         "catalog_admin_principal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "existing_metastore_id": {
           "type": "string",
           "minLength": 1
         }

@@ -7,6 +7,7 @@ cloud:
   provider: aws
   region: us-east-1
   account: '556940913059'
+  databricks_account_id: eddbb85f-6b3c-4261-8ca2-0d9d62575ce2
 application:
   name: Isolated Proof
   identifier: isolated-proof

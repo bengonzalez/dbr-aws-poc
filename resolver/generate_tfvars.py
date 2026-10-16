@@ -12,6 +12,7 @@ from inventory import (
     allocate_subnets,
     require,
     resolve_connectivity,
+    resolve_databricks_account_id,
     resolve_existing_vpc_cidr,
     resolve_metastore_id,
     resolve_platform_network,
@@ -224,11 +225,19 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
     produce (existing resource ids, concrete subnet CIDRs).
     """
 
+    # Normally already resolved by main() (deployment override > request's
+    # cloud.databricks_account_id > inventory default) and merged into
+    # `deployment` before this function runs - this check only fires if
+    # build_tfvars() is called directly without that resolution step.
     databricks_account_id = deployment.get("databricks", {}).get("account_id")
 
     require(
         bool(databricks_account_id),
-        "Deployment file is missing 'databricks.account_id'.",
+        "No Databricks account id resolved - see "
+        "inventory.resolve_databricks_account_id() for where this should "
+        "come from (deployment.yaml override, request's "
+        "cloud.databricks_account_id, or platform/inventory/aws.yaml's "
+        "default).",
     )
 
     deployment_network = deployment.get("network", {})
@@ -280,16 +289,24 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
         "ownership": normalized["ownership"],
         "network": network,
         "data": normalized["data"],
-        "encryption": normalized["encryption"],
-        # catalog_admin_principal (when present) is surfaced separately as
-        # its own top-level var below - var.governance's object type
-        # doesn't declare it, since it's consumed directly by
-        # modules/unity-catalog-workspace, not by the governance-shaped
+        # KMS bring-your-own-key ARNs (when present) are surfaced
+        # separately as their own top-level vars below - var.encryption's
+        # object type only declares workspace/application_data.
+        "encryption": {
+            key: value
+            for key, value in normalized["encryption"].items()
+            if key not in KMS_PASSTHROUGH_KEYS
+        },
+        # catalog_admin_principal/existing_metastore_id (when present) are
+        # surfaced separately as their own top-level vars below -
+        # var.governance's object type doesn't declare either, since
+        # they're consumed directly by modules/unity-catalog-workspace /
+        # inventory.resolve_metastore_id(), not by the governance-shaped
         # resolver output itself.
         "governance": {
             key: value
             for key, value in normalized["governance"].items()
-            if key != "catalog_admin_principal"
+            if key not in ("catalog_admin_principal", "existing_metastore_id")
         },
         "compute": normalized["compute"],
         "logging": normalized["logging"],
@@ -325,8 +342,22 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
         if key in overrides:
             tfvars[f"{key}_override"] = overrides[key]
 
-    if "existing_security_group_id" in overrides:
-        tfvars["existing_security_group_id"] = overrides["existing_security_group_id"]
+    # Existing security group id: deployment.yaml override > request's
+    # network.existing_security_group_id (CLAUDE.md §8 milestone 29).
+    # Security group ownership has no strategy-based default (always
+    # "terraform" unless overridden, modules/workspace-deployment/locals.tf)
+    # - the only reason an id is ever supplied is to use it, so its
+    # presence alone implies ownership "existing", without also requiring
+    # a separate overrides.security_group_ownership key. setdefault()
+    # leaves an explicit overrides.security_group_ownership (set just
+    # above) untouched if present.
+    existing_security_group_id = overrides.get(
+        "existing_security_group_id"
+    ) or normalized["network"].get("existing_security_group_id")
+
+    if existing_security_group_id is not None:
+        tfvars["existing_security_group_id"] = existing_security_group_id
+        tfvars.setdefault("security_group_ownership_override", "existing")
 
     # Connectivity (PrivateLink vs NAT) only matters when Terraform owns
     # enough of the networking stack to act on it - and PrivateLink and
@@ -343,10 +374,10 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
     #     endpoints_ownership (deliberately different from PrivateLink
     #     above - client-vpc-proof has endpoints_ownership "terraform" but
     #     vpc_ownership "existing", and must NOT get NAT).
-    # deployment.yaml's overrides.privatelink_enabled/nat_enabled (if
-    # explicitly set) win over the request-level network.connectivity
-    # resolution - same override-beats-default precedence as everywhere
-    # else in this pipeline.
+    # network.connectivity (request-level) is the only control surface for
+    # this - no deployment.yaml override exists (CLAUDE.md §8 milestone
+    # 29 removed it: nothing was found that connectivity couldn't already
+    # express via "privatelink"/"nat"/"auto").
     if endpoints_ownership == "terraform" or vpc_ownership == "terraform":
         privatelink_enabled, nat_enabled = resolve_connectivity(
             databricks_account_id,
@@ -355,14 +386,9 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
         )
 
         if endpoints_ownership == "terraform":
-            tfvars["privatelink_enabled_override"] = overrides.get(
-                "privatelink_enabled", privatelink_enabled
-            )
-        elif "privatelink_enabled" in overrides:
-            tfvars["privatelink_enabled_override"] = overrides["privatelink_enabled"]
+            tfvars["privatelink_enabled_override"] = privatelink_enabled
 
         if vpc_ownership == "terraform":
-            nat_enabled = overrides.get("nat_enabled", nat_enabled)
             tfvars["nat_enabled_override"] = nat_enabled
 
             if nat_enabled:
@@ -379,17 +405,25 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
 
                 tfvars["nat_subnet_cidr"] = nat_subnet_cidr
 
+    # KMS bring-your-own-key ARNs: deployment.yaml override > request's
+    # encryption.existing_* (CLAUDE.md §8 milestone 29).
     kms = deployment.get("kms", {})
 
     for key in KMS_PASSTHROUGH_KEYS:
-        if key in kms:
-            tfvars[key] = kms[key]
+        value = kms.get(key) or normalized["encryption"].get(key)
+
+        if value is not None:
+            tfvars[key] = value
 
     if normalized["governance"]["unity_catalog"]:
         region = normalized["cloud"]["region"]
 
         tfvars["existing_metastore_id"] = resolve_metastore_id(
-            databricks_account_id, region, deployment, inventory
+            databricks_account_id,
+            region,
+            deployment,
+            inventory,
+            normalized["governance"].get("existing_metastore_id"),
         )
 
         # Optional: who should be granted ALL_PRIVILEGES on the catalog.
@@ -476,6 +510,27 @@ def main() -> None:
 
     deployment = load_yaml(deployment_path)
     inventory = load_yaml(ROOT / "platform" / "inventory" / "aws.yaml")
+
+    # Resolve once, up front: deployment.yaml's 'databricks.account_id'
+    # override > the request's cloud.databricks_account_id > the AWS
+    # account's inventory default (CLAUDE.md §8 milestone 29). Merged
+    # back into `deployment` so every downstream read (ensure_subnet_
+    # allocation, build_tfvars) keeps working unchanged - same pattern
+    # ensure_subnet_allocation itself already uses for its own result.
+    databricks_account_id = resolve_databricks_account_id(
+        normalized["cloud"]["account"],
+        inventory,
+        normalized["cloud"].get("databricks_account_id"),
+        deployment.get("databricks", {}).get("account_id"),
+    )
+
+    deployment = {
+        **deployment,
+        "databricks": {
+            **deployment.get("databricks", {}),
+            "account_id": databricks_account_id,
+        },
+    }
 
     # Check this (and every other committed workspace's) CIDR allocations
     # for collisions before generating anything Terraform would act on.

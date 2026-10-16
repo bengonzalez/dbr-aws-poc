@@ -9,8 +9,12 @@
 
 api_version: v1
 
-databricks:
-  account_id: "331f8702-2e00-42e9-82e2-2935e7e1d4f9"
+# This workspace's Databricks account is the AWS account's known default
+# (331f8702...) - looked up automatically from platform/inventory/aws.yaml's
+# 'aws.accounts.<name>.databricks_account_id'. Nothing needed here unless
+# this workspace needs to register with a DIFFERENT Databricks account:
+# databricks:
+#   account_id: "..."
 
 # This workspace's VPC/route tables are the AWS account's known "primary"
 # network (vpc-60c2a81d) - looked up automatically from
@@ -40,16 +44,22 @@ network:
         availability_zone: us-east-1b
 
 # Optional per-resource ownership overrides (uncomment to deviate from the
-# network.strategy preset for one specific resource):
+# network.strategy preset for one specific resource). An existing security
+# group id is normally supplied in the workspace request instead
+# (network.existing_security_group_id) - its presence alone implies
+# security_group_ownership "existing", so only vpc/routing/endpoints
+# ownership ever need setting here:
 # overrides:
 #   vpc_ownership: terraform
 #   routing_ownership: terraform
-#   security_group_ownership: terraform
 #   endpoints_ownership: terraform
-#   existing_security_group_id: sg-xxxxxxxx
+#   existing_security_group_id: sg-xxxxxxxx   # rare: bypasses the request
 
-# Optional bring-your-own KMS keys (only meaningful when encryption is
-# customer_managed; omit to let the platform create dedicated keys):
+# Bring-your-own KMS keys are normally supplied in the workspace request
+# instead (encryption.existing_workspace_storage_key_arn/alias,
+# encryption.existing_managed_services_key_arn/alias) - only meaningful
+# when encryption.workspace resolves to customer_managed. This 'kms:'
+# block is a rarely-needed override on top of that:
 # kms:
 #   existing_workspace_storage_key_arn: arn:aws:kms:...
 #   existing_workspace_storage_key_alias: alias/...
@@ -58,7 +68,8 @@ network:
 
 # The metastore for this workspace's Databricks account (331f8702...) is
 # looked up automatically from platform/inventory/aws.yaml's
-# 'databricks.accounts' section - nothing needed here unless this
-# workspace needs to override that default:
+# 'databricks.accounts' section. A different metastore is normally
+# requested via governance.existing_metastore_id in the workspace
+# request - this 'unity_catalog:' block is a rarely-needed override:
 # unity_catalog:
 #   existing_metastore_id: "..."

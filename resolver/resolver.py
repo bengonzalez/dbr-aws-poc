@@ -263,12 +263,35 @@ def resolve_configuration(
         "workspace_binding": workspace_binding,
     }
 
-    catalog_admin_principal = request.get("governance", {}).get(
-        "catalog_admin_principal"
-    )
+    request_governance = request.get("governance", {})
 
-    if catalog_admin_principal is not None:
-        governance["catalog_admin_principal"] = catalog_admin_principal
+    for key in ("catalog_admin_principal", "existing_metastore_id"):
+        if key in request_governance:
+            governance[key] = request_governance[key]
+
+    # ---------------------------------------------------------
+    # Resolve encryption requester input - plain passthrough (bring-your-
+    # own KMS key ARNs), same treatment as governance.catalog_admin_principal
+    # above. encryption.workspace/application_data stay entirely profile-
+    # derived - the requester never picks the encryption MODE, only
+    # optionally supplies an existing key once customer_managed applies.
+    # ---------------------------------------------------------
+
+    encryption = {
+        "workspace": profile["encryption"]["workspace"],
+        "application_data": profile["encryption"]["application_data"],
+    }
+
+    request_encryption = request.get("encryption", {})
+
+    for key in (
+        "existing_workspace_storage_key_arn",
+        "existing_workspace_storage_key_alias",
+        "existing_managed_services_key_arn",
+        "existing_managed_services_key_alias",
+    ):
+        if key in request_encryption:
+            encryption[key] = request_encryption[key]
 
     # ---------------------------------------------------------
     # Resolve network requester input - plain passthroughs, not
@@ -314,9 +337,34 @@ def resolve_configuration(
         },
     }
 
-    for key in ("vpc_cidr", "existing_vpc_id", "existing_vpc_cidr"):
+    for key in (
+        "vpc_cidr",
+        "existing_vpc_id",
+        "existing_vpc_cidr",
+        "existing_security_group_id",
+    ):
         if key in request_network:
             network[key] = request_network[key]
+
+    # ---------------------------------------------------------
+    # Resolve cloud requester input - databricks_account_id is a plain
+    # passthrough override, same treatment as the network/governance
+    # passthroughs above. Which AWS account this workspace runs on
+    # (account_id) is a pipeline/operator input (the --account flag),
+    # not requester-controlled - only the Databricks account it
+    # registers with inside that AWS account is ever requester-
+    # overridable, and only for the rare case the AWS account's
+    # inventory default isn't the right one.
+    # ---------------------------------------------------------
+
+    cloud = {
+        "provider": request["cloud"]["provider"],
+        "region": request["cloud"]["region"],
+        "account": account_id,
+    }
+
+    if "databricks_account_id" in request.get("cloud", {}):
+        cloud["databricks_account_id"] = request["cloud"]["databricks_account_id"]
 
     # ---------------------------------------------------------
     # Build normalized configuration
@@ -331,11 +379,7 @@ def resolve_configuration(
             "isolation": profile["workspace"]["isolation"],
         },
 
-        "cloud": {
-            "provider": request["cloud"]["provider"],
-            "region": request["cloud"]["region"],
-            "account": account_id,
-        },
+        "cloud": cloud,
 
         "application": request["application"],
 
@@ -347,10 +391,7 @@ def resolve_configuration(
             "classification": data_classification,
         },
 
-        "encryption": {
-            "workspace": profile["encryption"]["workspace"],
-            "application_data": profile["encryption"]["application_data"],
-        },
+        "encryption": encryption,
 
         "governance": governance,
 
