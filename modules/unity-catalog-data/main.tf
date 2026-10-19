@@ -102,6 +102,7 @@ resource "databricks_storage_credential" "this" {
   name           = "${var.workspace_name}-uc-storage-credential"
   metastore_id   = var.existing_metastore_id
   isolation_mode = "ISOLATION_MODE_ISOLATED"
+  force_destroy  = true
 
   aws_iam_role {
     role_arn = "arn:aws:iam::${var.aws_account_id}:role/${local.uc_role_name}"

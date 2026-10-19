@@ -266,6 +266,15 @@ is to set `endpoints_ownership_override = "terraform"` for dev specifically
   first-time apply in this project (§4a) — cleared on retry, 0 drift on
   a follow-up plan. **Real, ongoing AWS cost while live**: one NAT
   Gateway.
+- **All three live workspaces (`isolated-dev-2`, `existing-vpc-proof`,
+  `isolated-proof`) destroyed for real on 2026-10-19**, once manual
+  testing (including real notebook-driven Unity Catalog read/write
+  activity on `isolated-dev-2`) was complete. See §8 milestone 34 for
+  the real teardown gaps this surfaced (non-empty S3 buckets, a Unity
+  Catalog storage-credential deletion block) and how each was resolved.
+  `existing-vpc-proof`'s underlying VPC (`vpc-0c7507e977fba2ee1`) was
+  never Terraform-managed (§8 milestone 32) and is still live — deleting
+  it, if desired, is a separate manual AWS action.
 
 ## 5. Known gaps / inconsistencies to resolve
 
@@ -2380,6 +2389,73 @@ Priority order agreed on:
       table ids - `27 to add, 0 to change, 0 to destroy`, no errors.
       Shared root re-initialized back to `existing-vpc-proof`'s backend
       afterward.
+34. **All three live workspaces destroyed for real; two real teardown
+    gaps found and fixed** (2026-10-19). Once manual testing was
+    complete (including real notebook-driven Unity Catalog read/write
+    activity against `isolated-dev-2` — see §4a), the user asked to
+    destroy `isolated-dev-2`, `existing-vpc-proof`, and `isolated-proof`
+    in one pass. Two real, previously-unseen `terraform destroy` gaps
+    surfaced — neither was an applied-infrastructure design flaw, both
+    are now documented so a future teardown doesn't re-discover them
+    from scratch:
+    - **Non-empty S3 buckets block `aws_s3_bucket` deletion.** Neither
+      the workspace-root bucket (DBFS/notebook/job data, `isolated-dev-2`
+      only — the one workspace with real manual activity) nor the Unity
+      Catalog managed-storage bucket (actual table data written via a
+      real notebook on `isolated-dev-2`) has `force_destroy` set, so
+      Terraform's `aws_s3_bucket.Destroy` fails with `BucketNotEmpty`
+      whenever real data was written. Fixed by manually emptying each
+      bucket (`aws s3 rm <bucket> --recursive`) before retrying
+      `terraform destroy` — not a code change, since `force_destroy`
+      on the bucket resources themselves was deliberately never set
+      (accidental data loss protection is more valuable day-to-day than
+      convenience at teardown time, same reasoning Terraform's own
+      default encodes).
+    - **A Unity Catalog storage credential can't be deleted while a
+      "dependent storage location" reference lingers, even after its
+      catalog/external-location/schemas are already gone and its S3
+      bucket is empty.** Hit identically on all three workspaces'
+      `databricks_storage_credential` resource:
+      *"Storage credential '...' has 0 directly dependent external
+      table(s) and 1 dependent storage location(s). You may use force
+      option to delete it..."* — this is Unity Catalog-side bookkeeping
+      (the catalog's own implicit managed-storage-root reference),
+      not a real orphaned-data risk once the bucket is confirmed
+      empty. Added `force_destroy = true` to
+      `modules/unity-catalog-data/main.tf`'s
+      `databricks_storage_credential.this` (the provider's documented
+      switch for this exact case) — but a plain `terraform destroy`
+      with that flag set still failed outright on `existing-vpc-proof`/
+      `isolated-proof` with the identical message. **Working sequence,
+      verified three times**: first run a *plan+apply* of just that one
+      resource (`terraform plan -target=...databricks_storage_credential.this
+      -out=p && terraform apply p`) — this update attempt itself always
+      fails too (`"...use force option to update anyway"`, since the
+      provider's Update path doesn't appear to honor `force_destroy`
+      either) — but immediately following that failed update attempt
+      with a plain `terraform destroy -target=...databricks_storage_credential.this`
+      then succeeds. Root cause not fully pinned down (most likely the
+      failed update request itself nudges Unity Catalog's backend to
+      drop the stale dependent-location reference as a side effect, or
+      coincidental timing — waiting on its own, without the
+      update-then-destroy sequence, did **not** reliably clear it, even
+      after several retries over ~2 minutes on `existing-vpc-proof`).
+      **Worth remembering for any future teardown using this module**:
+      if a plain `terraform destroy` stalls on this exact error, run
+      the plan/apply-then-destroy sequence above on that one resource
+      before assuming anything is actually broken.
+    - All three workspaces fully destroyed: `isolated-dev-2` (29
+      resources across two passes), `existing-vpc-proof` (17 resources
+      — root bucket was already empty, pipeline-mechanics-only test per
+      milestone 32), `isolated-proof` (27 resources — same, no manual
+      UC activity had ever been run against it). `existing-vpc-proof`'s
+      manually-created VPC (`vpc-0c7507e977fba2ee1`) was never
+      Terraform-managed (milestone 32) and is still live — out of scope
+      for `terraform destroy`, a separate manual AWS cleanup if wanted.
+    - `force_destroy = true` on the storage credential is left in place
+      permanently (not reverted) — it's a reasonable standing default
+      for this factory's own teardown workflow and caused no issue for
+      any resource in this pass once combined with the sequence above.
 
 ## 9. Conventions observed (keep consistent)
 
