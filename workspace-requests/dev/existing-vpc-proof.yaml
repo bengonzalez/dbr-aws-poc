@@ -1,0 +1,53 @@
+api_version: v1
+
+request:
+  id: REQ-00128
+  submitted_by: benjamin.gonzalez
+  source: workspace-request
+
+workspace:
+  name: existing-vpc-proof
+  environment: dev
+
+cloud:
+  provider: aws
+  region: us-east-1
+  # Second Databricks account (the "TSA" CLI profile), different from
+  # this AWS account's inventory default
+  # (platform/inventory/aws.yaml's aws.accounts.dev.databricks_account_id).
+  databricks_account_id: "eddbb85f-6b3c-4261-8ca2-0d9d62575ce2"
+
+application:
+  name: Existing VPC Proof
+  identifier: existing-vpc-proof
+
+ownership:
+  technical_owner: platform-team
+  business_owner: technology
+
+data:
+  classification: internal
+
+network:
+  strategy: custom
+  # A VPC created manually outside this factory, simulating a real client
+  # handing over their own existing VPC. Not the AWS account's known
+  # "primary" network, so its CIDR must be supplied too - lets subnet
+  # auto-allocation know the address space to carve from.
+  existing_vpc_id: vpc-0c7507e977fba2ee1
+  existing_vpc_cidr: 10.71.0.0/16
+  # No existing_route_table_ids: this VPC has no usable existing routing
+  # (no NAT Gateway / internet egress configured anywhere in it) -
+  # routing_ownership therefore infers to "terraform" (new, local-only
+  # route tables - see CLAUDE.md §8 milestone 30).
+  #
+  # Known, accepted limitation of this test: with no PrivateLink on this
+  # Databricks account and no NAT (this factory won't build one inside a
+  # VPC it doesn't own), classic compute has no path to the control
+  # plane. This is intentionally a pipeline-mechanics test - proving
+  # request -> resolve -> apply works end-to-end against real AWS/
+  # Databricks accounts - not a fully usable workspace. Clusters are not
+  # expected to start.
+
+tags:
+  cost_center: platform-test

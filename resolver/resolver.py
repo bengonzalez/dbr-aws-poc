@@ -343,6 +343,7 @@ def resolve_configuration(
         "existing_vpc_cidr",
         "existing_security_group_id",
         "existing_route_table_ids",
+        "existing_subnet_ids",
     ):
         if key in request_network:
             network[key] = request_network[key]

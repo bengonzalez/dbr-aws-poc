@@ -148,6 +148,13 @@
           }
         },
 
+        "existing_subnet_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+
         "requirements": {
           "type": "object",
           "additionalProperties": false,

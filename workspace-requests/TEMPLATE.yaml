@@ -1,0 +1,126 @@
+# TEMPLATE - not a real request. Copy this to
+# workspace-requests/<env>/<your-workspace-name>.yaml and fill it in.
+# Every REPLACE-ME must be changed; everything else is either a real
+# default or an optional field you can delete if you don't need it.
+#
+# This file is intentionally kept schema-valid (with placeholder values)
+# so you can sanity-check your copy against it, but it is never meant to
+# be resolved or deployed itself.
+#
+# Background: this factory turns this one file into a fully provisioned
+# Databricks workspace. You (the requester) describe WHAT you need and
+# WHAT you already have (an existing VPC, an existing security group,
+# etc.) - the platform team's resolver figures out everything else
+# (IAM roles, encryption, Unity Catalog, endpoints...). See README.md
+# for the full pipeline; this file only covers what you fill in here.
+
+api_version: v1
+
+request:
+  id: REQ-00000                # pick an unused REQ-##### id (digits only after REQ-)
+  submitted_by: REPLACE-ME     # your name or team, e.g. "jane.doe" or "data-platform-team"
+  source: workspace-request
+
+workspace:
+  name: replace-me             # lowercase letters/numbers/dashes only, e.g. "document-ai-dev" - becomes the Databricks workspace name
+  environment: dev             # dev | stage | live
+
+cloud:
+  provider: aws
+  region: us-east-1
+
+  # Optional. Only set this if you need a DIFFERENT Databricks account
+  # than the one your AWS account normally uses by default (ask the
+  # platform team if you're not sure which account you're in -
+  # platform/inventory/aws.yaml's aws.accounts.<name>.databricks_account_id
+  # is the default for your AWS account).
+  # databricks_account_id: "REPLACE-ME"
+
+application:
+  name: REPLACE-ME             # human-readable, e.g. "Document AI"
+  identifier: replace-me       # lowercase letters/numbers/dashes only, e.g. "document-ai"
+
+ownership:
+  technical_owner: REPLACE-ME  # who maintains this workspace day to day
+  business_owner: REPLACE-ME   # who owns the budget/decision for it
+
+data:
+  classification: internal     # public | internal | sensitive | restricted - change as needed
+
+network:
+  # "custom"   = you have (or want to use) an existing VPC.
+  # "isolated" = you want a brand-new, dedicated VPC built for you.
+  strategy: custom
+
+  # --- isolated strategy only ---
+  # Required when strategy is "isolated": the CIDR block for your new,
+  # dedicated VPC. This is YOUR choice (your own address-space
+  # allocation) - it must fall inside the reserved pool declared in
+  # platform/inventory/aws.yaml's cidr_pools.isolated_vpc_pool.
+  # vpc_cidr: "10.xx.0.0/16"
+
+  # --- custom strategy only ---
+  # Optional: the existing VPC you're handing over. Omit entirely to use
+  # your AWS account's default/"primary" VPC instead.
+  # existing_vpc_id: "vpc-REPLACE-ME"
+  #
+  # Required alongside existing_vpc_id UNLESS that VPC is already known
+  # to the platform team (ask them, or just try without it first - the
+  # resolver will tell you clearly if it's missing).
+  # existing_vpc_cidr: "10.xx.0.0/16"
+  #
+  # Optional: if your existing VPC already has usable route tables
+  # (e.g. with a working NAT Gateway / internet route) that you want new
+  # subnets attached to, list their ids here. Omit this for a bare VPC -
+  # the platform will then build fresh, local-only route tables for you.
+  # IMPORTANT if you omit this AND your VPC has no NAT Gateway/PrivateLink
+  # support: classic compute will have no path to the Databricks control
+  # plane. Check with the platform team before assuming this is fine.
+  # existing_route_table_ids:
+  #   - rtb-REPLACE-ME
+  #
+  # Optional: an existing security group to use instead of a new one.
+  # existing_security_group_id: "sg-REPLACE-ME"
+  #
+  # Optional: if your VPC already has subnets you want used (instead of
+  # letting the platform create and size new ones for you), list their ids
+  # here - at least two, in different availability zones. CAUTION: because
+  # these subnets' CIDRs aren't looked up, they're invisible to the
+  # platform's cross-workspace CIDR-collision check - don't combine this
+  # with another workspace auto-allocating subnets into the same VPC.
+  # existing_subnet_ids:
+  #   - subnet-REPLACE-ME
+  #   - subnet-REPLACE-ME
+
+  # Optional. How classic compute reaches the Databricks control plane
+  # when the platform builds its own networking (isolated strategy, or
+  # an "isolated"-shaped override). "auto" (the default - you can just
+  # omit this line) picks PrivateLink when your Databricks account
+  # supports it, a NAT Gateway otherwise. Only set this to force a
+  # specific choice.
+  # connectivity: auto          # auto | privatelink | nat
+
+# Optional. Only meaningful once your workspace's encryption mode
+# resolves to "customer_managed" (a profile/policy decision, not yours
+# to set) - supply your own KMS keys here instead of letting the
+# platform create dedicated ones.
+# encryption:
+#   existing_workspace_storage_key_arn: "arn:aws:kms:..."
+#   existing_workspace_storage_key_alias: "alias/..."
+#   existing_managed_services_key_arn: "arn:aws:kms:..."
+#   existing_managed_services_key_alias: "alias/..."
+
+# Optional.
+# governance:
+#   # A Databricks user, group, or service principal to grant
+#   # ALL_PRIVILEGES on this workspace's Unity Catalog catalog. Omit to
+#   # leave the catalog ungranted (owner defaults to whoever runs
+#   # terraform apply).
+#   catalog_admin_principal: "REPLACE-ME"
+#
+#   # Only set this if you need a DIFFERENT Unity Catalog metastore than
+#   # your Databricks account/region's known default.
+#   existing_metastore_id: "REPLACE-ME"
+
+tags:
+  cost_center: REPLACE-ME

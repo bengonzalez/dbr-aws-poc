@@ -27,6 +27,7 @@ module "deployment" {
   endpoints_ownership_override      = var.endpoints_ownership_override
   vpc_cidr                          = var.vpc_cidr
   existing_security_group_id        = var.existing_security_group_id
+  existing_subnet_ids               = var.existing_subnet_ids
   privatelink_enabled_override      = var.privatelink_enabled_override
   nat_enabled_override              = var.nat_enabled_override
   nat_subnet_cidr                   = var.nat_subnet_cidr

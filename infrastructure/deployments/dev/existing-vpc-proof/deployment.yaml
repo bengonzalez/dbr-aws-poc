@@ -1,0 +1,8 @@
+# Deployment-only values for the "existing-vpc-proof" workspace -
+# deliberately near-empty. Every concrete value this workspace needs
+# (Databricks account, existing VPC id/CIDR) comes from
+# workspace-requests/dev/existing-vpc-proof.yaml instead - the real-world
+# proof that a normal workspace needs no edits here at all
+# (CLAUDE.md §8 milestones 28-31).
+
+api_version: v1

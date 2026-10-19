@@ -58,13 +58,9 @@ databricks:
           metastore_id: "0745ece3-cb83-4a7f-9dc5-dc1716c015c7"
 
 aws:
-
   accounts:
-
     dev:
       account_id: "556940913059"
-      environment: dev
-
       # Default Databricks account workspaces in this AWS account register
       # with, looked up automatically by resolver/generate_tfvars.py (same
       # pattern as metastore_id/vpc.id below) - a workspace only needs an
@@ -76,12 +72,9 @@ aws:
       # isolated-proof/client-vpc-proof to test PrivateLink/Enterprise-tier
       # behavior) via that override mechanism - see CLAUDE.md §8 milestone 29.
       databricks_account_id: "331f8702-2e00-42e9-82e2-2935e7e1d4f9"
-
       regions:
-
         us-east-1:
           approved: true
-
           # Region-level convention for auto-carving subnets out of
           # WHICHEVER VPC a workspace ends up using - the account's own
           # "primary" VPC below, a client-provided existing VPC named by
@@ -101,24 +94,32 @@ aws:
               - us-east-1b
 
           networks:
-
             primary:
-              name: databricks-dev
-
               # id/cidr looked up automatically by resolver/generate_tfvars.py
               # (and resolver/check_cidr_allocations.py) whenever VPC
               # ownership resolves to "existing" - a workspace's own
               # deployment.yaml 'platform.vpc_id'/'vpc_cidr' overrides this
               # default for a workspace reusing a DIFFERENT existing VPC
               # (e.g. a client-provided one). See CLAUDE.md §5.3/§8.
+              #
+              # Note what's deliberately NOT here (closed 2026-10-16,
+              # CLAUDE.md §8 milestone 32): this entry used to also declare
+              # ownership:/name:/security_groups:/endpoints:/dns: sub-keys
+              # mirroring policies.yaml's per-resource shape. None of them
+              # were ever read by any code - ownership is resolved per
+              # workspace from strategy + request-supplied ids + route-table
+              # presence (milestones 9, 28-31), never from a static "this is
+              # what the primary network's ownership looks like" fact (which
+              # would also have been semantically wrong: every workspace
+              # reusing this VPC still gets its own dedicated security group
+              # regardless of what a shared "security_groups: terraform"
+              # claim here said). Removed rather than left as unenforced,
+              # driftable documentation.
               vpc:
-                ownership: existing
                 id: vpc-60c2a81d
                 cidr: 172.31.0.0/16
 
               routing:
-                ownership: existing
-
                 # Looked up automatically by resolver/generate_tfvars.py
                 # (and resolver/check_cidr_allocations.py) whenever routing
                 # ownership resolves to "existing" - same auto-lookup
@@ -129,13 +130,3 @@ aws:
                 route_table_ids:
                   - rtb-042726c440509ac14
                   - rtb-0e29c295cc93c131c
-
-              security_groups:
-                ownership: terraform
-
-              endpoints:
-                ownership: existing
-
-              dns:
-                ownership: existing
-                private_dns: true

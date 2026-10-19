@@ -6,7 +6,8 @@ module "workspace_network" {
   existing_vpc_id = local.vpc_ownership == "existing" ? var.platform.vpc_id : null
   vpc_cidr        = local.vpc_ownership == "terraform" ? var.vpc_cidr : null
 
-  private_subnets = var.network.requirements.subnets.private
+  existing_subnet_ids = var.existing_subnet_ids
+  private_subnets     = var.existing_subnet_ids == null ? var.network.requirements.subnets.private : null
 
   existing_route_table_ids = local.routing_ownership == "existing" ? var.platform.route_table_ids : null
 

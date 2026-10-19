@@ -110,7 +110,13 @@ def ensure_subnet_allocation(
     before build_tfvars() needs it, auto-allocating it when the operator
     hasn't hand-typed one (CLAUDE.md §8 milestone 28).
 
-    Three cases, checked in order:
+    Four cases, checked in order:
+    0. network.existing_subnet_ids is set (deployment.yaml override, or
+       the request's own network.existing_subnet_ids - CLAUDE.md §8
+       milestone 33) - the requester is adopting pre-existing subnets
+       rather than having Terraform create any. No CIDR to allocate or
+       pin at all - return deployment unchanged; build_tfvars() surfaces
+       the ids directly as their own top-level Terraform variable.
     1. deployment.yaml already defines network.subnets.private (today's
        hand-maintained case) - return deployment unchanged. This is the
        entire backward-compatibility guarantee: every workspace that
@@ -130,6 +136,13 @@ def ensure_subnet_allocation(
        workspace's already-used ranges in the same VPC scope, allocate,
        write the result to allocated-subnets.yaml, and merge it in.
     """
+
+    existing_subnet_ids = deployment.get("network", {}).get(
+        "existing_subnet_ids"
+    ) or normalized.get("network", {}).get("existing_subnet_ids")
+
+    if existing_subnet_ids:
+        return deployment
 
     network = deployment.get("network", {})
 
@@ -282,17 +295,29 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
 
     deployment_network = deployment.get("network", {})
 
-    private_subnets = deployment_network.get("subnets", {}).get("private")
+    # Adopting pre-existing subnets (deployment.yaml override > request's
+    # network.existing_subnet_ids, CLAUDE.md §8 milestone 33) skips subnet
+    # CIDR allocation entirely - no 'network.subnets.private' is needed or
+    # expected in that case.
+    existing_subnet_ids = deployment_network.get(
+        "existing_subnet_ids"
+    ) or normalized["network"].get("existing_subnet_ids")
 
-    require(
-        isinstance(private_subnets, list) and len(private_subnets) >= 2,
-        "Deployment file must define at least two entries under "
-        "'network.subnets.private' (each with 'cidr' and "
-        "'availability_zone') - or, for a new workspace, supply "
-        "'network.vpc_cidr'/'existing_vpc_id' in the workspace request "
-        "so resolver/generate_tfvars.py's ensure_subnet_allocation() can "
-        "auto-allocate them.",
-    )
+    private_subnets = None
+
+    if existing_subnet_ids is None:
+        private_subnets = deployment_network.get("subnets", {}).get("private")
+
+        require(
+            isinstance(private_subnets, list) and len(private_subnets) >= 2,
+            "Deployment file must define at least two entries under "
+            "'network.subnets.private' (each with 'cidr' and "
+            "'availability_zone') - or, for a new workspace, supply "
+            "'network.vpc_cidr'/'existing_vpc_id' in the workspace request "
+            "so resolver/generate_tfvars.py's ensure_subnet_allocation() can "
+            "auto-allocate them, or 'network.existing_subnet_ids' to adopt "
+            "pre-existing subnets instead.",
+        )
 
     # Required whenever VPC ownership resolves to 'terraform' - whether by
     # the 'isolated' strategy's own default or by an explicit override. Not
@@ -305,22 +330,29 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
     network = dict(normalized["network"])
     requirements = dict(network["requirements"])
     subnets = dict(requirements["subnets"])
-    subnets["private"] = private_subnets
+
+    if existing_subnet_ids is not None:
+        subnets["ownership"] = "existing"
+        subnets.pop("private", None)
+    else:
+        subnets["ownership"] = "terraform"
+        subnets["private"] = private_subnets
 
     requirements["subnets"] = subnets
     network["requirements"] = requirements
 
     # connectivity/vpc_cidr/existing_vpc_id/existing_vpc_cidr/
-    # existing_security_group_id/existing_route_table_ids are all
-    # resolved separately (into privatelink_enabled_override/
-    # nat_enabled_override/vpc_cidr/platform/existing_security_group_id
-    # below) - var.network's object type doesn't declare any of them,
-    # since each is consumed as its own standalone variable, not
-    # threaded through the network object itself. (existing_security_
-    # group_id/existing_route_table_ids weren't being stripped here
-    # before this fix - a real bug introduced in milestone 29, latent
-    # because no real or throwaway test for that field had been run
-    # through terraform validate/plan, only inspected as raw JSON.)
+    # existing_security_group_id/existing_route_table_ids/
+    # existing_subnet_ids are all resolved separately (into
+    # privatelink_enabled_override/nat_enabled_override/vpc_cidr/platform/
+    # existing_security_group_id/existing_subnet_ids below) - var.network's
+    # object type doesn't declare any of them, since each is consumed as
+    # its own standalone variable, not threaded through the network object
+    # itself. (existing_security_group_id/existing_route_table_ids weren't
+    # being stripped here before this fix - a real bug introduced in
+    # milestone 29, latent because no real or throwaway test for that
+    # field had been run through terraform validate/plan, only inspected
+    # as raw JSON.)
     for key in (
         "connectivity",
         "vpc_cidr",
@@ -328,6 +360,7 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
         "existing_vpc_cidr",
         "existing_security_group_id",
         "existing_route_table_ids",
+        "existing_subnet_ids",
     ):
         network.pop(key, None)
 
@@ -430,6 +463,9 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
     if existing_security_group_id is not None:
         tfvars["existing_security_group_id"] = existing_security_group_id
         tfvars.setdefault("security_group_ownership_override", "existing")
+
+    if existing_subnet_ids is not None:
+        tfvars["existing_subnet_ids"] = existing_subnet_ids
 
     # Connectivity (PrivateLink vs NAT) only matters when Terraform owns
     # enough of the networking stack to act on it - and PrivateLink and

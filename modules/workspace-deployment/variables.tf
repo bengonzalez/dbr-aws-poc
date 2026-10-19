@@ -122,6 +122,12 @@ variable "existing_security_group_id" {
   default     = null
 }
 
+variable "existing_subnet_ids" {
+  description = "IDs of existing subnets (inside the existing VPC) to adopt instead of creating new ones. Null falls back to auto-creating subnets from network.requirements.subnets.private - see modules/workspace-network."
+  type        = list(string)
+  default     = null
+}
+
 variable "privatelink_enabled_override" {
   description = "Override whether Databricks PrivateLink is built, independent of endpoints_ownership. Null defers to the default (on whenever endpoints are terraform-owned). Set to false on accounts without Enterprise tier, which PrivateLink requires."
   type        = bool

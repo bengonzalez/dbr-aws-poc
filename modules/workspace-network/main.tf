@@ -1,5 +1,6 @@
 locals {
   create_vpc            = var.existing_vpc_id == null
+  create_subnets        = var.existing_subnet_ids == null
   create_routing        = var.existing_route_table_ids == null
   create_security_group = var.existing_security_group_id == null
 
@@ -19,6 +20,16 @@ locals {
   )
 
   vpc_id = local.create_vpc ? aws_vpc.this[0].id : data.aws_vpc.existing[0].id
+
+  # Adopted subnet ids are trusted as given, same as existing_route_table_ids
+  # below - no data-source lookup, so a typo'd id surfaces as a Databricks/AWS
+  # apply-time error rather than a plan-time one. Known limitation: because
+  # their real CIDRs are never looked up, adopted subnets are invisible to
+  # resolver/check_cidr_allocations.py's collision checker (CLAUDE.md §8
+  # milestone 33) - a sibling workspace auto-allocating into the same VPC
+  # could theoretically pick a range that overlaps one of these.
+  subnet_ids   = local.create_subnets ? aws_subnet.private[*].id : var.existing_subnet_ids
+  subnet_count = local.create_subnets ? length(var.private_subnets) : length(var.existing_subnet_ids)
 
   route_table_ids = (
     local.create_routing ?
@@ -48,11 +59,12 @@ resource "aws_vpc" "this" {
 }
 
 # ---------------------------------------------------------------------------
-# Subnets — always created by this module, inside whichever VPC is in use.
+# Subnets — reuse existing ones (existing_subnet_ids), or create new ones
+# inside whichever VPC is in use.
 # ---------------------------------------------------------------------------
 
 resource "aws_subnet" "private" {
-  count = length(var.private_subnets)
+  count = local.create_subnets ? length(var.private_subnets) : 0
 
   vpc_id = local.vpc_id
 
@@ -77,7 +89,7 @@ resource "aws_subnet" "private" {
 # ---------------------------------------------------------------------------
 
 resource "aws_route_table" "private" {
-  count = local.create_routing ? length(var.private_subnets) : 0
+  count = local.create_routing ? local.subnet_count : 0
 
   vpc_id = local.vpc_id
 
@@ -87,9 +99,9 @@ resource "aws_route_table" "private" {
 }
 
 resource "aws_route_table_association" "private" {
-  count = length(var.private_subnets)
+  count = local.subnet_count
 
-  subnet_id      = aws_subnet.private[count.index].id
+  subnet_id      = local.subnet_ids[count.index]
   route_table_id = local.route_table_ids[count.index]
 }
 

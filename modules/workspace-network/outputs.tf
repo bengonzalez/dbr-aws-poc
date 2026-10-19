@@ -9,8 +9,8 @@ output "vpc_cidr" {
 }
 
 output "private_subnet_ids" {
-  description = "Private subnet IDs created for the workspace."
-  value       = aws_subnet.private[*].id
+  description = "Private subnet IDs in use for the workspace (existing or newly created)."
+  value       = local.subnet_ids
 }
 
 output "route_table_ids" {

@@ -21,16 +21,39 @@ variable "vpc_cidr" {
 }
 
 variable "private_subnets" {
-  description = "Private subnets to create for the workspace."
+  description = "Private subnets to create for the workspace. Required when existing_subnet_ids is not set."
 
   type = list(object({
     cidr              = string
     availability_zone = string
   }))
 
+  default = null
+
   validation {
-    condition     = length(var.private_subnets) >= 2
-    error_message = "At least two private subnets are required."
+    condition     = var.private_subnets == null || length(var.private_subnets) >= 2
+    error_message = "When provided, at least two private subnets are required."
+  }
+}
+
+variable "existing_subnet_ids" {
+  description = "IDs of existing subnets (inside existing_vpc_id) to use for the workspace, instead of creating new ones. Null creates new subnets from private_subnets."
+  type        = list(string)
+  default     = null
+
+  validation {
+    condition     = var.existing_subnet_ids != null || var.private_subnets != null
+    error_message = "Either existing_subnet_ids or private_subnets must be provided."
+  }
+
+  validation {
+    condition     = var.existing_subnet_ids == null || var.existing_vpc_id != null
+    error_message = "existing_subnet_ids requires existing_vpc_id - subnets can only be adopted inside a VPC this module also reuses, not one it creates."
+  }
+
+  validation {
+    condition     = var.existing_subnet_ids == null || length(var.existing_subnet_ids) >= 2
+    error_message = "When provided, at least two existing subnet ids are required."
   }
 }
 
@@ -42,10 +65,14 @@ variable "existing_route_table_ids" {
   validation {
     condition = (
       var.existing_route_table_ids == null ||
-      length(var.existing_route_table_ids) == length(var.private_subnets)
+      (
+        var.existing_subnet_ids != null
+        ? length(var.existing_route_table_ids) == length(var.existing_subnet_ids)
+        : length(var.existing_route_table_ids) == length(var.private_subnets)
+      )
     )
 
-    error_message = "When provided, the number of existing route tables must match the number of private subnets."
+    error_message = "When provided, the number of existing route tables must match the number of subnets in use (existing_subnet_ids or private_subnets, whichever is set)."
   }
 }
 
