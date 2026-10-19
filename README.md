@@ -127,7 +127,16 @@ Run these from the repository root unless noted otherwise.
    (rather than fresh ones Terraform creates), supply
    `network.existing_route_table_ids` too — its presence alone resolves
    routing (and, by default, endpoints) ownership to `existing`; omit
-   it for a bare VPC with nothing to reuse yet.
+   it for a bare VPC with nothing to reuse yet. If your existing VPC
+   *already has subnets* you want used as-is (instead of letting the
+   platform carve new ones), supply `network.existing_subnet_ids`
+   (at least two, in different AZs) — the platform adopts them rather
+   than creating anything. **Caution**: that VPC needs
+   `enableDnsSupport`/`enableDnsHostnames` both enabled, or the S3/STS
+   interface endpoints will fail to apply; and because adopted
+   subnets' CIDRs are never looked up, they're invisible to the
+   cross-workspace collision checker — don't combine this with another
+   workspace auto-allocating into the same VPC.
 
    **Other optional request fields**, each with a platform-wide default
    so most workspaces never need them: `cloud.databricks_account_id`
