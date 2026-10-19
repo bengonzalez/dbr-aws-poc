@@ -1,0 +1,41 @@
+api_version: v1
+
+request:
+  id: REQ-00130
+  submitted_by: benjamin.gonzalez
+  source: workspace-request
+
+workspace:
+  name: isolated-dev-2
+  environment: dev
+
+cloud:
+  provider: aws
+  region: us-east-1
+  # Overridden to the TSA account - this AWS account's inventory default
+  # (331f8702...) has no currently-valid CLI profile authenticated locally.
+  databricks_account_id: "eddbb85f-6b3c-4261-8ca2-0d9d62575ce2"
+
+application:
+  name: Isolated Dev 2
+  identifier: isolated-dev-2
+
+ownership:
+  technical_owner: platform-team
+  business_owner: technology
+
+data:
+  classification: internal
+
+network:
+  strategy: isolated
+  # Our own address-space choice, inside platform/inventory/aws.yaml's
+  # reserved cidr_pools.isolated_vpc_pool (10.64.0.0/10). isolated-proof
+  # already uses 10.70.0.0/16 - picking a clearly separate /16.
+  vpc_cidr: 10.65.0.0/16
+  # connectivity left as "auto" (the default) - this Databricks account
+  # has no PrivateLink/Enterprise tier, so it resolves to a NAT Gateway,
+  # same as isolated-proof.
+
+tags:
+  cost_center: platform-test

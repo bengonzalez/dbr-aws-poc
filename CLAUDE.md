@@ -245,6 +245,27 @@ is to set `endpoints_ownership_override = "terraform"` for dev specifically
   pipeline-mechanics-test scope — see milestone 32) — classic compute
   has no control-plane path; only the request→resolve→apply pipeline
   itself was being proven.
+- **`isolated-dev-2` applied for real on 2026-10-19** — a second,
+  independent `isolated`-strategy workspace (alongside `isolated-proof`),
+  exercising the full "brand-new dedicated VPC" path end to end:
+  workspace id `7474645911867768`, url
+  `https://dbc-19dc7897-055f.cloud.databricks.com`, dedicated VPC
+  `vpc-09e4056b35123f4ad` (`10.65.0.0/16`, inside the reserved isolated
+  pool, clear of `isolated-proof`'s `10.70.0.0/16`), two auto-carved
+  private subnets + a NAT subnet, NAT Gateway (no PrivateLink — the
+  TSA Databricks account has no Enterprise tier), S3/STS endpoints,
+  Unity Catalog wired up. Registered against the TSA account
+  (`eddbb85f-6b3c-4261-8ca2-0d9d62575ce2`) rather than this AWS
+  account's inventory default, because the default account's only
+  locally-authenticated CLI profiles had all gone invalid at the time
+  (`bxg3611 Premium`/`bxg3611Premium`/`bengonzalezre` all showed
+  `Valid: NO` in `databricks auth profiles` — a local auth-state issue,
+  not a code problem) — `cloud.databricks_account_id` override used
+  instead of re-authenticating. Hit the same known, non-fatal IAM
+  propagation-lag retry on `databricks_mws_credentials` as every other
+  first-time apply in this project (§4a) — cleared on retry, 0 drift on
+  a follow-up plan. **Real, ongoing AWS cost while live**: one NAT
+  Gateway.
 
 ## 5. Known gaps / inconsistencies to resolve
 
