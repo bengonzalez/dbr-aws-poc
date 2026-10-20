@@ -2,7 +2,7 @@ from pathlib import Path
 import argparse
 import json
 
-from loader import load_yaml
+from loader import load_yaml, resolve_normalized_path
 from check_cidr_allocations import (
     check_all as check_cidr_allocations,
     used_subnets_for_scope,
@@ -567,16 +567,28 @@ def main() -> None:
         required=True,
         help=(
             "Workspace name. By default, looks for "
-            "normalized/<workspace>.yaml and "
+            "normalized/<provider>/<workspace>.yaml (auto-detected - pass "
+            "--provider if the same workspace name exists under more than "
+            "one provider) and "
             "infrastructure/deployments/<provider>/<environment>/<workspace>/"
-            "deployment.yaml (provider and environment both read from the "
-            "normalized file), writing "
+            "deployment.yaml (environment read from the normalized file), "
+            "writing "
             "infrastructure/deployments/<provider>/<environment>/<workspace>/"
             "terraform.tfvars.json. All workspaces for a given provider "
             "share that provider's one Terraform root "
             "(infrastructure/aws/workspace/ or infrastructure/azure/workspace/) "
             "- see resolver/generate_backend_config.py for selecting which "
             "workspace's state that root points at."
+        ),
+    )
+
+    parser.add_argument(
+        "--provider",
+        choices=["aws", "azure"],
+        help=(
+            "Disambiguate which provider's normalized config to use, only "
+            "needed when --workspace's name exists under more than one "
+            "provider's normalized/ subdirectory."
         ),
     )
 
@@ -599,7 +611,7 @@ def main() -> None:
 
     normalized_path = (
         Path(args.normalized) if args.normalized
-        else ROOT / "normalized" / f"{args.workspace}.yaml"
+        else resolve_normalized_path(ROOT, args.workspace, args.provider)
     )
 
     normalized = load_yaml(normalized_path)

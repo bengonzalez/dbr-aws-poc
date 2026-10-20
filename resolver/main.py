@@ -91,8 +91,12 @@ def main():
 
     print("Normalized configuration validation: PASS")
 
-    output_directory = ROOT / "normalized"
-    output_directory.mkdir(exist_ok=True)
+    # Cloud-scoped (CLAUDE.md Sec8 milestone 35) - a workspace name is
+    # conventionally unique per provider, not globally, as the very first
+    # cross-cloud sanity-check pair (two 'isolated-proof's) confirmed for
+    # real.
+    output_directory = ROOT / "normalized" / provider
+    output_directory.mkdir(parents=True, exist_ok=True)
 
     workspace_name = request["workspace"]["name"]
 

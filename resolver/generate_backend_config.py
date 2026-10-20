@@ -1,7 +1,7 @@
 from pathlib import Path
 import argparse
 
-from loader import load_yaml
+from loader import load_yaml, resolve_normalized_path
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -10,13 +10,15 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BUCKET = "beng-tfstatefiles"
 DEFAULT_REGION = "us-east-1"
 
-# Azure equivalents - the storage account/resource group don't need to
-# exist yet for code-only work (no real apply in this pass); same
-# bootstrap-ahead-of-use pattern the AWS bucket defaults above already
-# have (beng-tfstatefiles also pre-existed as a manually-created resource
-# outside this repo's Terraform).
+# Azure equivalents - manually created (az cli, not Terraform) in the
+# same subscription this factory's Azure workspaces deploy into, same
+# "pre-existing, manually-managed state bucket" posture as beng-tfstatefiles
+# above. storage account names are globally unique across ALL of Azure
+# (not just this subscription) - "stdatabrickstfstate" was taken, so this
+# one is suffixed with a slice of the subscription id, same convention
+# infrastructure/azure/workspace/locals.tf uses for the UC storage account.
 DEFAULT_RESOURCE_GROUP = "rg-databricks-tfstate"
-DEFAULT_STORAGE_ACCOUNT = "stdatabrickstfstate"
+DEFAULT_STORAGE_ACCOUNT = "sttfstate2539d6cd"
 DEFAULT_CONTAINER = "tfstate"
 
 
@@ -33,7 +35,7 @@ def main() -> None:
             "infrastructure/azure/workspace/backend.tfbackend); only the "
             "per-workspace 'key' (<environment>/<workspace>/"
             "terraform.tfstate, provider and environment both read from "
-            "normalized/<workspace>.yaml) goes into "
+            "normalized/<provider>/<workspace>.yaml) goes into "
             "infrastructure/deployments/<provider>/<environment>/<workspace>/"
             "backend.tfbackend. Pass both at init time: terraform init "
             "-backend-config=backend.tfbackend "
@@ -46,6 +48,16 @@ def main() -> None:
         "--workspace",
         required=True,
         help="Workspace name.",
+    )
+
+    parser.add_argument(
+        "--provider",
+        choices=["aws", "azure"],
+        help=(
+            "Disambiguate which provider's normalized config to use, only "
+            "needed when --workspace's name exists under more than one "
+            "provider's normalized/ subdirectory."
+        ),
     )
 
     parser.add_argument(
@@ -98,7 +110,7 @@ def main() -> None:
 
     normalized_path = (
         Path(args.normalized) if args.normalized
-        else ROOT / "normalized" / f"{args.workspace}.yaml"
+        else resolve_normalized_path(ROOT, args.workspace, args.provider)
     )
 
     normalized = load_yaml(normalized_path)

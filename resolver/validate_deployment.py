@@ -483,7 +483,11 @@ def main() -> int:
     normalized_path = (
         Path(args.normalized)
         if args.normalized
-        else ROOT / "normalized" / f"{args.workspace}.yaml"
+        # AWS-only script - "aws" is hardcoded, not auto-detected the way
+        # generate_tfvars.py/generate_backend_config.py do via
+        # loader.resolve_normalized_path(), since there's nothing to
+        # disambiguate here.
+        else ROOT / "normalized" / "aws" / f"{args.workspace}.yaml"
     )
 
     normalized = load_yaml(normalized_path)

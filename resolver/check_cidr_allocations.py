@@ -105,7 +105,9 @@ def _iter_deployments() -> list[tuple[str, dict, dict]]:
 
     for deployment_path in sorted(deployments_root.glob("*/*/deployment.yaml")):
         workspace_name = deployment_path.parent.name
-        normalized_path = ROOT / "normalized" / f"{workspace_name}.yaml"
+        # AWS-only script - "aws" is hardcoded, same reason as
+        # validate_deployment.py's identical hardcode.
+        normalized_path = ROOT / "normalized" / "aws" / f"{workspace_name}.yaml"
         normalized = load_yaml(normalized_path)
         deployment = _effective_deployment(
             workspace_name, load_yaml(deployment_path), normalized
