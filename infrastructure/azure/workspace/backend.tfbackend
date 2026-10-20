@@ -1,0 +1,3 @@
+resource_group_name  = "rg-databricks-tfstate"
+storage_account_name = "stdatabrickstfstate"
+container_name       = "tfstate"

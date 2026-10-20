@@ -1,0 +1,52 @@
+api_version: v1
+workspace:
+  name: azure-isolated-proof
+  environment: dev
+  isolation: dedicated
+cloud:
+  provider: azure
+  region: southcentralus
+  account: 2539d6cd-e5b0-409e-b246-ed2b4814ef5f
+application:
+  name: Azure Isolated Proof
+  identifier: azure-isolated-proof
+ownership:
+  technical_owner: platform-team
+  business_owner: technology
+network:
+  strategy: isolated
+  architecture: platform_managed
+  connectivity: auto
+  requirements:
+    vpc:
+      ownership: terraform
+    subnets:
+      ownership: terraform
+    routing:
+      ownership: terraform
+    security_groups:
+      ownership: terraform
+    endpoints:
+      ownership: terraform
+  vpc_cidr: 10.90.0.0/23
+data:
+  classification: internal
+encryption:
+  workspace: platform_managed
+  application_data: platform_managed
+governance:
+  unity_catalog: true
+  workspace_binding: optional
+compute:
+  policy: development
+logging:
+  level: standard
+  centralized: true
+  audit: false
+validation:
+  required: true
+  blocking: false
+  negative_tests: true
+  evidence: standard
+tags:
+  cost_center: platform-test

@@ -1,0 +1,39 @@
+api_version: v1
+
+platform:
+  name: databricks-platform
+  version: "1.0"
+
+# Azure's inventory is deliberately much smaller than aws.yaml's. Validated
+# directly against a real Azure subscription (throwaway spike, CLAUDE.md -
+# see the Azure milestone entry): Unity Catalog auto-enables and
+# auto-assigns a region/tenant-level metastore on workspace creation, so
+# there is no AWS-style "databricks_account_id" concept to default or
+# override here at all - nothing in this pipeline ever needs one for
+# Azure. There's also no subnet_defaults/availability_zones block: Azure
+# VNet-injection subnets aren't AZ-scoped the way AWS subnets are - a
+# workspace always gets exactly two regional subnets ("public"/"private",
+# Databricks' own naming), a fixed convention baked into
+# modules/azure-workspace-network rather than an inventory-driven
+# allocation.
+#
+# Scope note: only the "isolated"-equivalent strategy (always a brand-new,
+# Terraform-owned VNet) is supported today - there is no existing-VNet
+# reuse yet, so there's also no "networks.primary" vpc/routing block here
+# the way aws.yaml has one. Add that only once an Azure "custom" strategy
+# is actually built.
+azure:
+  accounts:
+    dev:
+      # Azure subscription id - resolver.py's resolve_configuration()
+      # looks this account up the same way it looks up an AWS account,
+      # keyed generically by cloud.provider.
+      account_id: "2539d6cd-e5b0-409e-b246-ed2b4814ef5f"
+      regions:
+        southcentralus:
+          approved: true
+          # Optional override - the rare case a tenant has more than one
+          # metastore in this region and wants a non-default one. Normal
+          # workspaces need nothing here: Azure auto-assigns the region's
+          # metastore on workspace creation, confirmed by the spike.
+          # metastore_id: "<override-metastore-id>"

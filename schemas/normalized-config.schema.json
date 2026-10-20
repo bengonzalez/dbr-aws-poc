@@ -42,7 +42,7 @@
       "properties": {
         "provider": {
           "type": "string",
-          "enum": ["aws"]
+          "enum": ["aws", "azure"]
         },
         "region": {
           "type": "string",
@@ -50,7 +50,8 @@
         },
         "account": {
           "type": "string",
-          "pattern": "^[0-9]{12}$"
+          "description": "AWS account id (12 digits) or Azure subscription id (UUID).",
+          "pattern": "^([0-9]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
         },
         "databricks_account_id": {
           "type": "string"

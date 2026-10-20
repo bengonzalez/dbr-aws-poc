@@ -1,5 +1,5 @@
 module "networking" {
-  source = "../../../modules/networking"
+  source = "../../../modules/aws-poc/networking"
 
   project_name        = var.project_name
   vpc_cidr            = var.vpc_cidr
@@ -8,7 +8,7 @@ module "networking" {
 }
 
 module "kms" {
-  source = "../../../modules/kms"
+  source = "../../../modules/aws-poc/kms"
 
   project_name                  = var.project_name
   databricks_account_id         = var.databricks_account_id
@@ -16,7 +16,7 @@ module "kms" {
 }
 
 module "storage" {
-  source = "../../../modules/storage"
+  source = "../../../modules/aws-poc/storage"
 
   providers = {
     databricks = databricks.mws
@@ -29,7 +29,7 @@ module "storage" {
 }
 
 module "security" {
-  source = "../../../modules/security"
+  source = "../../../modules/aws-poc/security"
 
   project_name                 = var.project_name
   aws_region                   = var.aws_region
@@ -42,7 +42,7 @@ module "security" {
 }
 
 module "endpoints" {
-  source = "../../../modules/endpoints"
+  source = "../../../modules/aws-poc/endpoints"
 
   project_name    = var.project_name
   vpc_id          = module.networking.vpc_id

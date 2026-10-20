@@ -160,23 +160,28 @@ def resolve_configuration(
     # Only the region-approval check lives here. Concrete VPC/subnet
     # values (ids, CIDRs, the subnet_defaults sizing/AZ convention) are
     # account-specific facts not known until deployment.yaml names the
-    # real AWS account - resolved in resolver/generate_tfvars.py instead,
-    # same boundary as the metastore id / connectivity resolution.
+    # real account/subscription - resolved in resolver/generate_tfvars.py
+    # instead, same boundary as the metastore id / connectivity
+    # resolution. Keyed generically by cloud.provider so the same block
+    # works for platform/inventory/aws.yaml's "accounts" and
+    # platform/inventory/azure.yaml's "accounts" (Azure subscriptions,
+    # same key names reused for a single generic code path here).
     # ---------------------------------------------------------
 
-    aws_inventory = inventory["aws"]
+    provider = request["cloud"]["provider"]
+    provider_inventory = inventory[provider]
 
     account_inventory = None
 
-    for account_name, account in aws_inventory["accounts"].items():
+    for account_name, account in provider_inventory["accounts"].items():
         if account["account_id"] == account_id:
             account_inventory = account
             break
 
     if account_inventory is None:
         raise ValueError(
-            f"AWS account '{account_id}' is not defined "
-            f"in the platform inventory."
+            f"{provider} account/subscription '{account_id}' is not "
+            f"defined in the platform inventory."
         )
 
     region = request["cloud"]["region"]
@@ -185,14 +190,15 @@ def resolve_configuration(
 
     if region_inventory is None:
         raise ValueError(
-            f"AWS region '{region}' is not defined for "
-            f"account '{account_id}' in the platform inventory."
+            f"{provider} region '{region}' is not defined for "
+            f"account/subscription '{account_id}' in the platform "
+            f"inventory."
         )
 
     if not region_inventory["approved"]:
         raise ValueError(
-            f"AWS region '{region}' is not approved for "
-            f"account '{account_id}'."
+            f"{provider} region '{region}' is not approved for "
+            f"account/subscription '{account_id}'."
         )
 
     # ---------------------------------------------------------

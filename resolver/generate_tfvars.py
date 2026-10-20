@@ -19,6 +19,7 @@ from inventory import (
     resolve_route_table_ids,
     subnet_defaults_for,
 )
+from generate_tfvars_azure import main_azure as _main_azure
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -567,12 +568,14 @@ def main() -> None:
         help=(
             "Workspace name. By default, looks for "
             "normalized/<workspace>.yaml and "
-            "infrastructure/deployments/<environment>/<workspace>/"
-            "deployment.yaml (environment read from the normalized file), "
-            "writing infrastructure/deployments/<environment>/<workspace>/"
-            "terraform.tfvars.json. All workspaces share the one Terraform "
-            "root in infrastructure/workspace/ - see "
-            "resolver/generate_backend_config.py for selecting which "
+            "infrastructure/deployments/<provider>/<environment>/<workspace>/"
+            "deployment.yaml (provider and environment both read from the "
+            "normalized file), writing "
+            "infrastructure/deployments/<provider>/<environment>/<workspace>/"
+            "terraform.tfvars.json. All workspaces for a given provider "
+            "share that provider's one Terraform root "
+            "(infrastructure/aws/workspace/ or infrastructure/azure/workspace/) "
+            "- see resolver/generate_backend_config.py for selecting which "
             "workspace's state that root points at."
         ),
     )
@@ -601,11 +604,20 @@ def main() -> None:
 
     normalized = load_yaml(normalized_path)
     environment = normalized["workspace"]["environment"]
+    provider = normalized["cloud"]["provider"]
 
     deployment_dir = (
-        ROOT / "infrastructure" / "deployments" / environment / args.workspace
+        ROOT / "infrastructure" / "deployments" / provider / environment / args.workspace
     )
 
+    if provider == "azure":
+        _main_azure(args, normalized, deployment_dir)
+        return
+
+    _main_aws(args, normalized, deployment_dir)
+
+
+def _main_aws(args, normalized: dict, deployment_dir: Path) -> None:
     deployment_path = (
         Path(args.deployment) if args.deployment
         else deployment_dir / "deployment.yaml"

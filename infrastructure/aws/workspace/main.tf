@@ -1,5 +1,5 @@
 module "deployment" {
-  source = "../../modules/workspace-deployment"
+  source = "../../../modules/aws/workspace-deployment"
 
   providers = {
     databricks.mws = databricks.mws

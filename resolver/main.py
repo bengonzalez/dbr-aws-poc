@@ -23,7 +23,7 @@ def main():
     parser.add_argument(
         "--account",
         required=True,
-        help="AWS account ID",
+        help="AWS account ID or Azure subscription ID (depending on the request's cloud.provider)",
     )
 
     args = parser.parse_args()
@@ -42,10 +42,11 @@ def main():
     print("Workspace request validation: PASS")
 
     environment = request["workspace"]["environment"]
+    provider = request["cloud"]["provider"]
 
     profile_path = ROOT / "profiles" / f"{environment}.yaml"
     policies_path = ROOT / "policies" / "policies.yaml"
-    inventory_path = ROOT / "platform" / "inventory" / "aws.yaml"
+    inventory_path = ROOT / "platform" / "inventory" / f"{provider}.yaml"
 
     profile = load_yaml(profile_path)
     policies = load_yaml(policies_path)

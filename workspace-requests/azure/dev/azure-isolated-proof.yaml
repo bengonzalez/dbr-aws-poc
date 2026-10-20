@@ -1,0 +1,40 @@
+api_version: v1
+
+request:
+  id: REQ-00131
+  submitted_by: platform-team
+  source: workspace-request
+
+workspace:
+  name: azure-isolated-proof
+  environment: dev
+
+cloud:
+  provider: azure
+  region: southcentralus
+
+application:
+  name: Azure Isolated Proof
+  identifier: azure-isolated-proof
+
+ownership:
+  technical_owner: platform-team
+  business_owner: technology
+
+data:
+  # "internal" (not "sensitive") - deliberately, for this first Azure
+  # workspace: customer-managed (Key Vault) encryption isn't built for
+  # Azure yet (resolver/generate_tfvars_azure.py rejects it with a clear
+  # error), so this classification must resolve to platform_managed.
+  classification: internal
+
+network:
+  strategy: isolated
+  # Our own address-space choice for this brand-new, Terraform-owned
+  # VNet - Azure has no reserved-pool/collision-checker equivalent yet
+  # (resolver/check_cidr_allocations.py is AWS-only in this pass), so this
+  # is just a sensible, clearly-separate-from-AWS range.
+  vpc_cidr: 10.90.0.0/23
+
+tags:
+  cost_center: platform-test

@@ -37,10 +37,14 @@ def _load_pool(inventory: dict) -> ipaddress.IPv4Network:
 
 
 def _allocated_subnets_path(workspace_name: str, environment: str) -> Path:
+    # AWS-only script (CLAUDE.md Sec8 milestone 35's Azure support doesn't
+    # extend here yet) - "aws" is hardcoded, not derived from a workspace's
+    # own normalized config.
     return (
         ROOT
         / "infrastructure"
         / "deployments"
+        / "aws"
         / environment
         / workspace_name
         / "allocated-subnets.yaml"
@@ -88,12 +92,14 @@ def _effective_deployment(workspace_name: str, deployment: dict, normalized: dic
 
 def _iter_deployments() -> list[tuple[str, dict, dict]]:
     """Return (workspace_name, deployment_dict, normalized_dict) for every
-    committed deployment.yaml under infrastructure/deployments/ (paired
-    with its same-named normalized/<workspace>.yaml - the same pairing
-    generate_tfvars.py itself relies on). deployment_dict has any
+    committed deployment.yaml under infrastructure/deployments/aws/ (AWS-
+    only script, CLAUDE.md Sec8 milestone 35 - Azure's own deployments
+    live under infrastructure/deployments/azure/ and aren't scanned here),
+    paired with its same-named normalized/<workspace>.yaml - the same
+    pairing generate_tfvars.py itself relies on. deployment_dict has any
     auto-allocated subnets already merged in - see _effective_deployment()."""
 
-    deployments_root = ROOT / "infrastructure" / "deployments"
+    deployments_root = ROOT / "infrastructure" / "deployments" / "aws"
 
     results = []
 

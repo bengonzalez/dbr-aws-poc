@@ -3,10 +3,13 @@ Checks a deployed workspace's live AWS/Databricks state against what the
 resolver resolved for it (normalized/<workspace>.yaml) - the consumer of
 policies.yaml's validation_policy (CLAUDE.md Sec5.8 / Sec8).
 
+AWS-only (CLAUDE.md Sec8 milestone 35's Azure support does not extend to
+this script yet).
+
 Unlike every other resolver/*.py script, this runs AFTER a real
 `terraform apply`, against live state, not before one against local YAML.
-Prerequisite: the shared root (infrastructure/workspace/) must already be
-`terraform init`'d with this workspace's backend-config - same standing
+Prerequisite: the shared root (infrastructure/aws/workspace/) must already
+be `terraform init`'d with this workspace's backend-config - same standing
 convention as plan/apply.
 
 Each check reports one of:
@@ -42,7 +45,7 @@ from loader import load_yaml
 from inventory import resolve_databricks_account_id, resolve_metastore_id
 
 ROOT = Path(__file__).resolve().parent.parent
-WORKSPACE_ROOT = ROOT / "infrastructure" / "workspace"
+WORKSPACE_ROOT = ROOT / "infrastructure" / "aws" / "workspace"
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -101,10 +104,10 @@ def get_terraform_outputs() -> dict:
 
     if result.returncode != 0:
         raise RuntimeError(
-            "'terraform output' failed in infrastructure/workspace/ - has "
-            "this workspace's backend been initialized? Run: terraform "
+            "'terraform output' failed in infrastructure/aws/workspace/ - "
+            "has this workspace's backend been initialized? Run: terraform "
             "init -backend-config=backend.tfbackend "
-            "-backend-config=../deployments/<env>/<name>/backend.tfbackend "
+            "-backend-config=../../deployments/aws/<env>/<name>/backend.tfbackend "
             f"-reconfigure first. ({result.stderr.strip()})"
         )
 
@@ -440,9 +443,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Validate a deployed workspace's live AWS/Databricks state "
-            "against what the resolver resolved for it. Run this after "
-            "terraform apply, with infrastructure/workspace/ already "
-            "terraform init'd against this workspace's backend-config."
+            "against what the resolver resolved for it. AWS-only. Run "
+            "this after terraform apply, with infrastructure/aws/workspace/ "
+            "already terraform init'd against this workspace's "
+            "backend-config."
         )
     )
 
@@ -491,6 +495,7 @@ def main() -> int:
         else ROOT
         / "infrastructure"
         / "deployments"
+        / "aws"
         / environment
         / args.workspace
         / "deployment.yaml"

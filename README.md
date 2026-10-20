@@ -1,9 +1,18 @@
-# Databricks Workspace Factory (AWS)
+# Databricks Workspace Factory
 
 A Terraform + Python pipeline that turns a small, requester-supplied YAML
-file into a fully provisioned Databricks workspace on AWS — networking,
-IAM, encryption, storage, and workspace registration — without the
-requester having to specify any AWS-level details themselves.
+file into a fully provisioned Databricks workspace — networking, IAM,
+encryption, storage, and workspace registration — without the requester
+having to specify any cloud-level details themselves.
+
+**AWS is the mature, real-apply-tested path** — everything below is
+written for it. **Azure support exists but is deliberately bounded**
+(an `isolated`-equivalent strategy only, no real `terraform apply` yet) —
+see `CLAUDE.md`'s §8 milestone 35 and `workspace-requests/azure/TEMPLATE.yaml`
+if you're working on the Azure side; its directories mirror AWS's one-for-one
+(`modules/azure/`, `infrastructure/azure/workspace/`,
+`workspace-requests/azure/`, `infrastructure/deployments/azure/`) but the
+step-by-step instructions below are AWS-specific.
 
 > For the detailed architecture, design decisions, and project history, see
 > [`CLAUDE.md`](CLAUDE.md). This file is the practical "how do I run this"
@@ -11,34 +20,54 @@ requester having to specify any AWS-level details themselves.
 
 ## Directory structure
 
+Every cloud-specific location is grouped under a top-level `<cloud>/`
+segment (`aws`/`azure`), mirroring `databricks/terraform-databricks-sra`'s
+own split. Shown below for AWS; Azure's shape is one-for-one identical
+under `azure/` wherever it appears (`modules/azure/...`,
+`infrastructure/azure/workspace/`, `workspace-requests/azure/<env>/`,
+`infrastructure/deployments/azure/<env>/<name>/`) except where noted.
+
 ```
 .
-├── workspace-requests/              # Requester input: minimal YAML per workspace
-│   ├── dev/<name>.yaml
-│   ├── stage/<name>.yaml
-│   └── live/<name>.yaml
+├── workspace-requests/
+│   ├── aws/
+│   │   ├── dev/<name>.yaml
+│   │   ├── stage/<name>.yaml
+│   │   ├── live/<name>.yaml
+│   │   └── TEMPLATE.yaml
+│   └── azure/                       # Bounded scope - see CLAUDE.md §8 milestone 35
+│       ├── dev/<name>.yaml
+│       └── TEMPLATE.yaml
 │
 ├── normalized/                      # Resolver output - the fully resolved
-│   └── <name>.yaml                  # "contract" for one workspace (generated)
+│   └── <name>.yaml                  # "contract" for one workspace (generated, flat -
+│                                     #   workspace names are already globally unique)
 │
 ├── resolver/                        # Python pipeline (request → Terraform inputs)
 │   ├── main.py                      # workspace-request → normalized/<name>.yaml
 │   ├── resolver.py                  # core resolution logic (profiles + policies)
 │   ├── loader.py / validator.py     # YAML loading + JSON Schema validation
 │   ├── generate_tfvars.py           # normalized + deployment.yaml → terraform.tfvars.json
+│   │                                 #   (AWS body; dispatches to generate_tfvars_azure.py
+│   │                                 #   for Azure workspaces)
+│   ├── generate_tfvars_azure.py     # Azure's tfvars generation - smaller, bounded scope
 │   └── generate_backend_config.py   # normalized → backend.tfbackend (both the per-workspace
-│                                     #   key file and the shared bucket/region/use_lockfile file)
+│                                     #   key file and the shared constants file, AWS or Azure
+│                                     #   shaped depending on the workspace's cloud.provider)
 │
 ├── schemas/                         # JSON Schemas: workspace-request, normalized-config, profile
 ├── profiles/{dev,stage,live}.yaml   # Per-environment platform defaults
 ├── policies/                        # Platform-wide rules (network/security/data/governance/validation)
-├── platform/inventory/aws.yaml      # Known existing AWS infra per account/region
+├── platform/inventory/
+│   ├── aws.yaml                     # Known existing AWS infra per account/region
+│   └── azure.yaml                   # Azure's much smaller equivalent (no account-level
+│                                     #   Databricks id - Unity Catalog auto-assigns per tenant)
 │
 ├── infrastructure/
-│   ├── workspace/                   # THE Terraform root - shared by every workspace
+│   ├── aws/workspace/               # THE AWS Terraform root - shared by every AWS workspace
 │   │   ├── providers.tf             # AWS + Databricks (account-console) providers
 │   │   ├── versions.tf              # Provider/Terraform version pins + partial S3 backend
-│   │   ├── variables.tf             # Full input contract (see modules/workspace-deployment)
+│   │   ├── variables.tf             # Full input contract (see modules/aws/workspace-deployment)
 │   │   ├── main.tf                  # Single `module "deployment"` call
 │   │   ├── outputs.tf               # Forwards module outputs
 │   │   │
@@ -46,37 +75,55 @@ requester having to specify any AWS-level details themselves.
 │   │   │                            #   bucket/region/use_lockfile, identical for every workspace
 │   │   └── local.auto.tfvars        # Gitignored: your own Databricks CLI profile name
 │   │
+│   ├── azure/workspace/             # THE Azure Terraform root - parallel sibling, same shape.
+│   │   │                            #   No local.auto.tfvars equivalent - auth_type = "azure-cli"
+│   │   │                            #   reuses whatever `az login` session is active.
+│   │   └── ...                      #   (providers.tf/versions.tf/variables.tf/main.tf/outputs.tf/
+│   │                                 #   backend.tfbackend, same roles as the AWS root above)
+│   │
 │   ├── deployments/                 # Per-workspace deployment files, grouped by workspace -
-│   │   └── <env>/<name>/            #   kept separate from workspace-requests/ (requester-facing
-│   │       ├── deployment.yaml      #   input) and infrastructure/workspace/ (shared TF root)
-│   │       ├── terraform.tfvars.json#   deployment.yaml: committed, hand-maintained (existing
-│   │       ├── backend.tfbackend    #   resource ids, overrides - subnet CIDRs now optional).
-│   │       └── allocated-subnets.yaml# terraform.tfvars.json / backend.tfbackend / allocated-
-│   │                                #   subnets.yaml (only created if subnets were auto-
-│   │                                #   carved, pinned once written): GENERATED - never
-│   │                                #   hand-edit.
+│   │   ├── aws/<env>/<name>/        #   kept separate from workspace-requests/ (requester-facing
+│   │   │   ├── deployment.yaml      #   input) and infrastructure/<cloud>/workspace/ (shared TF root)
+│   │   │   ├── terraform.tfvars.json#   deployment.yaml: committed, hand-maintained (existing
+│   │   │   ├── backend.tfbackend    #   resource ids, overrides - subnet CIDRs now optional).
+│   │   │   └── allocated-subnets.yaml# terraform.tfvars.json / backend.tfbackend / allocated-
+│   │   │                            #   subnets.yaml (only created if subnets were auto-
+│   │   │                            #   carved, pinned once written): GENERATED - never
+│   │   │                            #   hand-edit.
+│   │   └── azure/<env>/<name>/      #   same deployment.yaml/terraform.tfvars.json/backend.tfbackend
+│   │                                #   shape - no allocated-subnets.yaml (no auto-allocation yet)
 │   │
 │   ├── nonprod/poc/                 # Frozen original proof of concept - reference only
 │   ├── platform/                    # Reserved, empty (no shared/cross-workspace state exists)
 │   └── application/                 # Reserved, empty (no app-layer resources yet)
 │
 ├── modules/
-│   ├── workspace-deployment/        # Composed deployment logic (used by infrastructure/workspace)
-│   ├── workspace-network/           # VPC/subnets/routing/security group (existing-or-create)
-│   ├── workspace-endpoints/         # S3 gateway + STS (+ KMS) interface endpoints
-│   ├── workspace-privatelink/       # Databricks PrivateLink (requires Enterprise tier)
-│   ├── workspace-iam-role/          # Cross-account IAM role
-│   ├── workspace-kms/               # Customer-managed KMS keys (+ bring-your-own-key)
-│   ├── databricks-account/, databricks-workspace/, unity-catalog-*/  # Planned, empty
-│   └── networking/, kms/, security/, storage/, endpoints/            # POC-era, used only by
-│                                                                      #   infrastructure/nonprod/poc
+│   ├── aws/
+│   │   ├── workspace-deployment/    # Composed deployment logic (used by infrastructure/aws/workspace)
+│   │   ├── workspace-network/       # VPC/subnets/routing/security group (existing-or-create)
+│   │   ├── workspace-endpoints/     # S3 gateway + STS (+ KMS) interface endpoints
+│   │   ├── workspace-privatelink/   # Databricks PrivateLink (requires Enterprise tier)
+│   │   ├── workspace-iam-role/      # Cross-account IAM role
+│   │   ├── workspace-kms/           # Customer-managed KMS keys (+ bring-your-own-key)
+│   │   ├── unity-catalog-data/, unity-catalog-workspace/  # Unity Catalog
+│   │   └── databricks-account/, databricks-workspace/     # Planned, empty
+│   ├── azure/
+│   │   ├── workspace-deployment/    # Network + workspace creation only (Unity Catalog composed
+│   │   │                            #   in infrastructure/azure/workspace/ itself - see CLAUDE.md)
+│   │   ├── workspace-network/       # VNet + two delegated subnets + NSG (create-only, no
+│   │   │                            #   existing-VNet reuse yet)
+│   │   └── unity-catalog-data/, unity-catalog-workspace/  # ADLS Gen2 + access connector chain
+│   └── aws-poc/                     # POC-era, used only by infrastructure/nonprod/poc - kept
+│       │                            #   visually distinct from modules/aws/ since it's frozen/
+│       │                            #   superseded, not part of the active factory path
+│       └── networking/, kms/, security/, storage/, endpoints/
 │
 ├── requirements.txt                 # Python deps for resolver/ (PyYAML, jsonschema)
 └── CLAUDE.md                        # Detailed architecture tracker and decision history
 ```
 
-**There is exactly one copy of the Terraform code** (`infrastructure/workspace/`
-+ `modules/`). Every workspace — `dev`, `stage`, `live`, however many there
+**There is exactly one copy of the Terraform code** (`infrastructure/aws/workspace/`
++ `modules/aws/`). Every workspace — `dev`, `stage`, `live`, however many there
 end up being — runs through that same root. Nothing per-workspace gets
 copied except the small per-workspace directory under `infrastructure/deployments/`.
 
@@ -101,7 +148,7 @@ copied except the small per-workspace directory under `infrastructure/deployment
 Run these from the repository root unless noted otherwise.
 
 1. **Write the request.** Create
-   `workspace-requests/<env>/<name>.yaml` with the minimal fields
+   `workspace-requests/aws/<env>/<name>.yaml` with the minimal fields
    (application, environment, owner, cost center, data classification,
    network strategy). See existing files in that directory for examples.
 
@@ -152,7 +199,7 @@ Run these from the repository root unless noted otherwise.
 
 2. **Resolve it.**
    ```
-   python resolver/main.py --request workspace-requests/<env>/<name>.yaml --account <aws_account_id>
+   python resolver/main.py --request workspace-requests/aws/<env>/<name>.yaml --account <aws_account_id>
    ```
    Produces `normalized/<name>.yaml` — the fully resolved configuration.
 
@@ -186,39 +233,39 @@ Run these from the repository root unless noted otherwise.
    against every committed workspace's `deployment.yaml` and fails loudly
    on any collision or pool violation. If `deployment.yaml` didn't specify
    subnet CIDRs, it then auto-allocates them (writing a new, generated
-   `infrastructure/deployments/<env>/<name>/allocated-subnets.yaml` —
+   `infrastructure/deployments/aws/<env>/<name>/allocated-subnets.yaml` —
    **do not hand-edit this file; delete it to force reallocation before
    first apply**, since it's permanently pinned on every run afterward)
    and re-runs the collision check once more before writing tfvars.
-   Produces `infrastructure/deployments/<env>/<name>/terraform.tfvars.json`
+   Produces `infrastructure/deployments/aws/<env>/<name>/terraform.tfvars.json`
    and `.../backend.tfbackend` (just this workspace's state `key`), and
-   (re)writes `infrastructure/workspace/backend.tfbackend` (the
+   (re)writes `infrastructure/aws/workspace/backend.tfbackend` (the
    bucket/region/use_lockfile settings shared by every workspace).
 
 5. **Set your Databricks CLI profile.** Either export it for the shell
    session (`export TF_VAR_databricks_profile="your-profile-name"`) or copy
-   `infrastructure/workspace/local.auto.tfvars.example` to
+   `infrastructure/aws/workspace/local.auto.tfvars.example` to
    `local.auto.tfvars` and fill it in (gitignored, never committed).
 
 6. **Point the shared root at this workspace's state.** From
-   `infrastructure/workspace/`, pass **both** backend-config files - the
+   `infrastructure/aws/workspace/`, pass **both** backend-config files - the
    shared one first, then this workspace's:
    ```
    terraform init \
      -backend-config=backend.tfbackend \
-     -backend-config=../deployments/<env>/<name>/backend.tfbackend \
+     -backend-config=../../deployments/aws/<env>/<name>/backend.tfbackend \
      -reconfigure -input=false
    ```
 
 7. **Plan, review, then apply.**
    ```
-   terraform plan  -var-file=../deployments/<env>/<name>/terraform.tfvars.json
-   terraform apply -var-file=../deployments/<env>/<name>/terraform.tfvars.json
+   terraform plan  -var-file=../../deployments/aws/<env>/<name>/terraform.tfvars.json
+   terraform apply -var-file=../../deployments/aws/<env>/<name>/terraform.tfvars.json
    ```
    Read the plan before applying. See warnings below.
 
 8. **(Optional) Validate the deployment.** After a successful apply, with
-   `infrastructure/workspace/` still pointed at this workspace's backend:
+   `infrastructure/aws/workspace/` still pointed at this workspace's backend:
    ```
    python resolver/validate_deployment.py --workspace <name> --profile <same-profile-as-apply>
    ```
@@ -281,7 +328,7 @@ Run these from the repository root unless noted otherwise.
   credential validation checks."* This is IAM trust-policy propagation lag,
   not a real error — a plain retry a few seconds to minutes later typically
   succeeds. See `CLAUDE.md` for details.
-- **Databricks PrivateLink (`modules/workspace-privatelink`) requires an
+- **Databricks PrivateLink (`modules/aws/workspace-privatelink`) requires an
   Enterprise-tier Databricks account.** You don't normally need to do
   anything about this: a request's `network.connectivity` defaults to
   `"auto"`, which automatically falls back to a NAT Gateway whenever the
@@ -322,16 +369,16 @@ artifacts):
 1. **resolve** — run `resolver/main.py` for the changed request. Artifact:
    `normalized/<name>.yaml`.
 2. **generate** — run `generate_tfvars.py` and `generate_backend_config.py`.
-   Artifacts: `infrastructure/deployments/<env>/<name>/terraform.tfvars.json`,
-   `.../backend.tfbackend`, and `infrastructure/workspace/backend.tfbackend`.
+   Artifacts: `infrastructure/deployments/aws/<env>/<name>/terraform.tfvars.json`,
+   `.../backend.tfbackend`, and `infrastructure/aws/workspace/backend.tfbackend`.
 3. **validate** — `terraform fmt -check -recursive`, then `terraform init
    -backend-config=backend.tfbackend
-   -backend-config=../deployments/<env>/<name>/backend.tfbackend
+   -backend-config=../../deployments/aws/<env>/<name>/backend.tfbackend
    -reconfigure -input=false` and `terraform validate`. A fresh pipeline run
    always starts with a clean checkout, so there's no "forgot to
    reconfigure" risk here the way there is for manual/local use.
 4. **plan** — `terraform plan
-   -var-file=../deployments/<env>/<name>/terraform.tfvars.json
+   -var-file=../../deployments/aws/<env>/<name>/terraform.tfvars.json
    -out=plan.tfplan`. Post the plan as an MR comment (`gitlab-terraform`
    style tooling, or a simple script piping `terraform show -no-color
    plan.tfplan`) so a reviewer can read it before anything is applied.
@@ -342,7 +389,7 @@ artifacts):
    this pipeline has a track record.
 
 **Known gap to resolve before this can actually run in CI**:
-`infrastructure/workspace/providers.tf` currently authenticates to
+`infrastructure/aws/workspace/providers.tf` currently authenticates to
 Databricks via `auth_type = "databricks-cli"` + `profile`, which reads an
 interactive CLI login from the runner's local config — that doesn't exist
 on a CI runner and won't work unmodified. CI needs a **non-interactive**
