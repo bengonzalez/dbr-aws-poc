@@ -2885,8 +2885,24 @@ Priority order agreed on:
       workspace's own successful deletion is not a real problem — just
       retry.** Confirmed fully gone via `databricks account workspaces
       get <id>` (`RESOURCE_DOES_NOT_EXIST`) and an AWS VPC tag lookup
-      (empty). Whether to tear down the still-live Azure
-      `isolated-proof` too is a separate, pending decision.
+      (empty).
+    - **Azure `isolated-proof` destroyed on 2026-10-20 too** — clean on
+      the first attempt, 17 resources, zero errors (no RBAC-propagation
+      retry needed this time either). Confirmed the exact same
+      orphaned-managed-resource-group gap the original spike found
+      (CLAUDE.md's milestone 35 Azure spike section) is real, not a
+      one-off: `rg-isolated-proof`'s `azurerm_databricks_workspace`
+      destroyed cleanly, but its Databricks-managed resource group
+      (`rg-isolated-proof-managed` — the auto-created DBFS storage
+      account + a system-created `unity-catalog-access-connector`)
+      did **not** cascade-delete with it, needing the same manual `az
+      group delete` workaround. This is now confirmed as a standing,
+      repeatable Azure teardown step for this factory, not something
+      that was specific to the throwaway spike. Verified fully gone
+      via `az group list` (empty) for both the main and managed
+      resource groups. Both cloud's sanity-check workspaces are now
+      torn down — this project currently has no live applied
+      infrastructure on either cloud.
 
 ## 9. Conventions observed (keep consistent)
 
