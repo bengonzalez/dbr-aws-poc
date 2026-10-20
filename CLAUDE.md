@@ -2856,12 +2856,37 @@ Priority order agreed on:
       (including `governance.unity_catalog.catalog`, confirming the
       external-location cleanup held). `terraform fmt -check
       -recursive` clean repo-wide.
-    - **Both workspaces left live** at the time of writing — AWS
-      `isolated-proof` (workspace id in `terraform output`, NAT Gateway
-      running — real ongoing cost) and Azure `isolated-proof`
-      (workspace id `7405610851132439`, url
-      `https://adb-7405610851132439.19.azuredatabricks.net`). Whether
-      to tear either down is a separate, pending decision.
+    - **AWS `isolated-proof` destroyed on 2026-10-20** (user's call —
+      NAT Gateway's ongoing cost), **Azure `isolated-proof` left
+      live** (workspace id `7405610851132439`, url
+      `https://adb-7405610851132439.19.azuredatabricks.net`).
+      Buckets were already empty (sanity-check only, no real
+      notebook/table activity on this workspace) so no manual
+      empty-bucket step was needed this time. Hit one **new**
+      eventual-consistency gap, distinct from the already-documented
+      IAM-propagation-lag one (§4a): on the first destroy attempt,
+      `databricks_mws_workspaces.this` deleted successfully, but the
+      very next resources in the same apply —
+      `databricks_mws_networks.workspace` and `databricks_mws_storage_configurations.workspace_root`
+      — immediately failed with *"Cannot delete a network/
+      StorageConfiguration while it is attached to a workspace
+      (<id>)"*, even though that workspace had just been deleted.
+      The account API accepts and returns success for the workspace
+      delete before the deletion has actually fully propagated
+      server-side, so dependent resources deleted in the same
+      `terraform destroy` run can still see the workspace as attached
+      for a few seconds afterward. Fixed the same way every other
+      propagation-lag issue in this project has been: a plain retry
+      of `terraform destroy` succeeded completely (23 resources: NAT
+      Gateway, VPC, all networking, `databricks_mws_networks`/
+      `databricks_mws_storage_configurations` themselves). Worth
+      remembering for any future AWS teardown: **a destroy failing on
+      "still attached to a workspace" immediately after that
+      workspace's own successful deletion is not a real problem — just
+      retry.** Confirmed fully gone via `databricks account workspaces
+      get <id>` (`RESOURCE_DOES_NOT_EXIST`) and an AWS VPC tag lookup
+      (empty). Whether to tear down the still-live Azure
+      `isolated-proof` too is a separate, pending decision.
 
 ## 9. Conventions observed (keep consistent)
 
