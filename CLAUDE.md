@@ -2903,6 +2903,61 @@ Priority order agreed on:
       resource groups. Both cloud's sanity-check workspaces are now
       torn down — this project currently has no live applied
       infrastructure on either cloud.
+37. **Cluster/NSG spike — the last explicitly-unverified piece of the
+    Azure path, now resolved** (2026-10-20). CLAUDE.md milestone 35
+    flagged two things the original workspace-creation spike never
+    proved, since no cluster was ever started: whether the baseline
+    NSG (default rules only, no extra Secure-Cluster-Connectivity
+    rules) is sufficient for a real cluster to actually start, and
+    whether cluster nodes have any usable internet egress at all given
+    this factory builds no NAT/firewall equivalent for Azure (unlike
+    AWS's NAT-Gateway fallback). Both resolved with a real test, not
+    just reasoning about it:
+    - Deployed a dedicated throwaway workspace (`cluster-nsg-spike`)
+      through the **real, committed** Azure pipeline this time (not a
+      standalone spike `.tf` file like the original workspace-creation
+      spike) — a deliberate choice, since the whole point was to
+      validate production code's behavior, not a one-off config.
+      Applied cleanly, 17 resources, zero errors.
+    - Created a single-node cluster (`Standard_DS3_v2`,
+      `15.4.x-scala2.12`, `SINGLE_USER` mode) via the Databricks CLI
+      with `auth_type = "azure-cli"` — **reached `RUNNING` state**,
+      directly proving the baseline NSG is sufficient: Secure Cluster
+      Connectivity, instance acquisition, and driver registration with
+      the control plane all worked with zero custom NSG rules added.
+    - Ran a real notebook job on that cluster (via `databricks jobs
+      submit` with `existing_cluster_id`, not the legacy Command
+      Execution API - `/api/1.2/contexts/create` returned a plain 404,
+      apparently fully removed) that did actual Python/Spark compute
+      and attempted two outbound HTTPS calls. Result: `{"compute_check":
+      2, "internet_pypi": "OK 200", "aad_reachable": "OK 200"}` —
+      **real compute executes correctly, and cluster nodes reach the
+      general internet despite `no_public_ip = true` and no NAT/
+      firewall of any kind.** This is because Azure gives every VM in a
+      VNet subnet default outbound internet access unless something
+      explicitly removes it (a NAT gateway/firewall/UDR this factory
+      never built for Azure) — not something this project configured,
+      just a platform default that happens to make the "no NAT needed"
+      assumption hold. Worth remembering if Azure ever changes this
+      default for new subnets, or if a client's own Azure Policy
+      disables default outbound access tenant-wide - that would
+      silently break cluster egress with no Terraform-visible symptom.
+    - Both findings mean `modules/azure/workspace-network`'s current,
+      minimal baseline (default NSG rules, no NAT/firewall) needs no
+      changes - the milestone 35 gaps are closed as "verified
+      sufficient," not "still open."
+    - Fully torn down afterward: cluster permanently deleted via
+      `databricks clusters permanent-delete`, then `terraform destroy`
+      (17 resources, clean), then the usual managed-resource-group
+      orphan (`rg-cluster-nsg-spike-managed`) manually deleted - the
+      third time in a row this exact orphan has appeared, now beyond
+      doubt a standing Azure teardown step for this factory, not
+      incidental to any one workspace. The spike's own request/
+      normalized/deployment files were deleted rather than committed
+      (same "leaves no trace once findings are written up" treatment
+      as the original workspace-creation spike), since this was an
+      explicit one-off validation, not a workspace meant to be
+      redeployed later the way `isolated-proof` is.
 
 ## 9. Conventions observed (keep consistent)
 

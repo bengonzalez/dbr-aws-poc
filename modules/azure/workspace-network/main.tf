@@ -3,16 +3,19 @@
 # two subnets delegated to Microsoft.Databricks/workspaces (Databricks'
 # own "public"/"private" naming - no public IP is actually assigned to
 # anything, see azurerm_databricks_workspace's no_public_ip = true in
-# modules/azure-workspace-deployment) plus a baseline NSG (default rules
+# modules/azure/workspace-deployment) plus a baseline NSG (default rules
 # only). No existing-VNet-reuse variables yet - deferred, same as how
 # AWS's own "custom" strategy was built on top of a working "isolated"
 # baseline across several later milestones, not all at once.
 #
-# Known, documented gap (not silently "fixed" here): whether the baseline
-# NSG's default rules are actually sufficient for real cluster traffic -
-# Microsoft's docs recommend additional Secure-Cluster-Connectivity rules -
-# was never verified by the spike (no cluster was started). Revisit before
-# relying on this for anything beyond workspace creation.
+# The baseline NSG's default rules (no extra Secure-Cluster-Connectivity
+# rules) were confirmed sufficient for real cluster traffic by a second
+# real-subscription spike (CLAUDE.md Sec8, the cluster/NSG milestone): a
+# single-node cluster reached RUNNING and ran a real notebook job.
+# Internet egress also worked with no NAT/firewall of any kind - Azure's
+# default-outbound-internet-access for VMs in a VNet subnet covered it.
+# Revisit only if Azure ever changes that default, or a client's own
+# Azure Policy disables it tenant-wide.
 
 resource "azurerm_virtual_network" "this" {
   name                = "vnet-${var.workspace_name}"
