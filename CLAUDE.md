@@ -150,12 +150,13 @@ requirements, security controls, Terraform behavior.
 | `infrastructure/platform/` | Empty placeholder, deliberately not pursued yet | Would be shared/platform-owned Terraform state used by multiple workspaces. Considered for a shared KMS key during an earlier architecture review and explicitly rejected — every workspace creates and owns its own KMS key(s) in its own state (own S3 key, now). Revisit only if a real need for cross-workspace sharing shows up. |
 | `infrastructure/application/` | Empty placeholder | Reserved for application-level resources layered on top of a workspace. Not started. |
 | `modules/aws-poc/networking`, `modules/aws-poc/kms`, `modules/aws-poc/security`, `modules/aws-poc/storage`, `modules/aws-poc/endpoints` | POC-era, superseded for the factory | Built for the single-shot POC (`infrastructure/nonprod/poc`). Hardcode `var.project_name`, use a placeholder `ec2.amazonaws.com` trust policy in `security` (explicitly flagged in that file's own comment as provisional), single KMS key, 2-bucket storage. `modules/aws-poc/kms` is superseded by `modules/aws/workspace-kms`, and `modules/aws-poc/endpoints` by `modules/aws/workspace-endpoints`, for the factory path — both POC modules stay only for `infrastructure/nonprod/poc`, don't extend them further. `networking`/`security`/`storage` still need generalized replacements if/when needed. |
-| `modules/aws/workspace-deployment` | **Working** | The composed, real deployment logic: network, endpoints, PrivateLink, IAM role, KMS, credentials/storage/network/workspace registration. Called by the one shared root (above) for every workspace — no longer "called by every new per-workspace directory" now that milestone 10's approach was superseded by milestone 12. Deliberately excludes the old scratch `terraform_data.workspace_configuration` resource (§5.5) — no reason to carry known debt into this module. |
-| `modules/azure/workspace-network`, `modules/azure/workspace-deployment` | **New, §8 milestone 35** | Azure's analogs of `modules/aws/workspace-network`/`modules/aws/workspace-deployment` — nested under a top-level `modules/azure/` directory (mirroring `databricks/terraform-databricks-sra`'s own `aws/`/`azure/` split; initially prefixed `azure-` instead, moved into this nested layout before the first commit once the user asked for cloud-segregated directories across the whole repo). `workspace-network`: create-only VNet-injection path validated by a real-subscription spike — VNet + two `Microsoft.Databricks/workspaces`-delegated subnets + a baseline NSG (default rules only; whether that's sufficient for real cluster traffic beyond workspace creation is an explicit, documented, unverified gap — no cluster was ever started). No existing-VNet-reuse variables yet, same "build the create-path first" sequencing AWS's own `custom` strategy went through. `workspace-deployment`: creates its own dedicated resource group + calls `workspace-network` + `azurerm_databricks_workspace` (`sku = "premium"`, `custom_parameters` wired to the network module's outputs). Deliberately does **not** compose Unity Catalog the way `modules/aws/workspace-deployment` does — see `infrastructure/azure/workspace/*.tf`'s row above for why. |
+| `modules/aws/workspace-deployment` | **Working** | The composed, real deployment logic: network, endpoints, PrivateLink, IAM role, KMS, credentials/storage/network/workspace registration, government-readiness hardening (§8 milestone 38 — `module.workspace_hardening`, after `databricks_mws_workspaces.this`). Called by the one shared root (above) for every workspace — no longer "called by every new per-workspace directory" now that milestone 10's approach was superseded by milestone 12. Deliberately excludes the old scratch `terraform_data.workspace_configuration` resource (§5.5) — no reason to carry known debt into this module. `s3.tf`'s root-bucket policy now also merges in an explicit `DenyInsecureTransport` statement (§8 milestone 38) on top of the Databricks-generated policy, via `aws_iam_policy_document`'s `source_policy_documents`. |
+| `modules/azure/workspace-network`, `modules/azure/workspace-deployment` | **New, §8 milestone 35; hardened §8 milestone 38** | Azure's analogs of `modules/aws/workspace-network`/`modules/aws/workspace-deployment` — nested under a top-level `modules/azure/` directory (mirroring `databricks/terraform-databricks-sra`'s own `aws/`/`azure/` split; initially prefixed `azure-` instead, moved into this nested layout before the first commit once the user asked for cloud-segregated directories across the whole repo). `workspace-network`: create-only VNet-injection path validated by a real-subscription spike — VNet + two `Microsoft.Databricks/workspaces`-delegated subnets + a baseline NSG (default rules only — confirmed sufficient for real cluster traffic by the milestone 37 cluster/NSG spike, no longer an open gap). No existing-VNet-reuse variables yet, same "build the create-path first" sequencing AWS's own `custom` strategy went through. `workspace-deployment`: creates its own dedicated resource group + calls `workspace-network` + `azurerm_databricks_workspace` (`sku = "premium"`, `custom_parameters` wired to the network module's outputs, plus — §8 milestone 38 — `default_storage_firewall_enabled = true` with a dedicated `azurerm_databricks_access_connector.dbfs`, and a native `enhanced_security_compliance` block gated on `compliance_standards` being non-empty). Deliberately does **not** compose Unity Catalog the way `modules/aws/workspace-deployment` does — see `infrastructure/azure/workspace/*.tf`'s row above for why. |
 | `modules/azure/unity-catalog-data`, `modules/azure/unity-catalog-workspace` | **New, §8 milestone 35, real-apply-verified by the spike (not this exact code, but the identical resource shapes)** | Azure's Unity Catalog modules — `unity-catalog-data` is a direct same-shape port of `modules/aws/unity-catalog-data` (ADLS Gen2 storage account + filesystem instead of an S3 bucket; `azurerm_databricks_access_connector` + an RBAC role assignment instead of an IAM role + policy; a `time_sleep` for RBAC propagation, same class of fix as AWS's IAM-propagation `time_sleep`; `databricks_storage_credential` with an `azure_managed_identity` block instead of `aws_iam_role`). `unity-catalog-workspace` is a deliberate **fork**, not a generalization, of `modules/aws/unity-catalog-workspace` — same `databricks_catalog`/`databricks_grants`/`databricks_default_namespace_setting` shape, but no `databricks_metastore_assignment` resource at all (Azure auto-assigns one) and no `provider_config { workspace_id }` blocks anywhere (both modules receive a workspace-URL-scoped `databricks` provider as their plain default, which already only ever talks to one workspace). Real, spike-validated simplification vs. AWS: **no `databricks_workspace_binding` resources at all** — AWS needs those only because its storage credential/external location are created through the account-level provider, which doesn't auto-bind isolated resources to the creating workspace; a workspace-scoped provider never has that mismatch. |
 | `modules/aws/workspace-network`, `modules/aws/workspace-endpoints`, `modules/aws/workspace-privatelink`, `modules/aws/workspace-iam-role`, `modules/aws/workspace-kms` | Working | Factory-style modules composed by `modules/aws/workspace-deployment`. `workspace-network` supports independent existing-or-create per sub-resource (vpc/routing/security-group, and, as of 2026-10-19, subnets too via `existing_subnet_ids` — §8 milestone 33) — both `custom` and `isolated` strategies are now real, not just modeled in config (§8) — and, as of 2026-10-15 (§8 milestone 27), an optional single-NAT-Gateway fallback (IGW, public subnet, EIP, NAT Gateway, default routes on the private route tables) gated on `nat_enabled && create_vpc`, for workspaces without Databricks PrivateLink available. `workspace-endpoints` provides the S3 gateway + STS (+ KMS, conditionally) interface endpoints needed whenever there's no NAT; its interface-endpoint security group ingress is scoped to the workspace compute security group (not a CIDR) — matches the SRA reference's approach (§7/§8); built regardless of whether NAT is also enabled (reduces NAT data-transfer cost either way). `workspace-privatelink` registers the two Databricks PrivateLink endpoints (REST API + SCC relay) and private access settings so classic compute can reach the control plane with no NAT — see §7/§8; requires Enterprise tier, see `network.connectivity` (§8 milestone 27) for the now-automatic NAT fallback when it isn't available. `workspace-iam-role` uses proper Databricks cross-account trust + restricted policy. `workspace-kms` provisions the customer-managed workspace-storage + managed-services keys, gated on `encryption.workspace == "customer_managed"`, with optional bring-your-own-existing-key inputs per key (§8). |
 | `modules/aws/unity-catalog-data/`, `modules/aws/unity-catalog-workspace/` | **Working, real-apply-verified** (§8 milestones 19, 21, 23) | `unity-catalog-data`: dedicated S3 bucket for UC managed storage, optional customer-managed KMS key (gated on `encryption.application_data`), the UC IAM role/policy chain (via `databricks_aws_unity_catalog_assume_role_policy`/`_policy` data sources, bootstrapped SRA-style to avoid the storage-credential/role circular dependency), a `time_sleep` for IAM propagation, storage credential (with an explicit `metastore_id` — required for account-level providers, §8 milestone 23), external location, and explicit `databricks_workspace_binding` resources for both the credential and external location (neither auto-binds to its creating workspace the way `databricks_catalog` does — found via a real apply, §8 milestone 23). `unity-catalog-workspace`: metastore assignment (to an existing, platform-owned metastore — not created here) + a dedicated, always-isolated catalog per workspace + default namespace setting + optional `databricks_grants` (§8 milestone 21). Both composed into `modules/aws/workspace-deployment`, gated on `governance.unity_catalog`, called *after* `databricks_mws_workspaces.this` (every UC resource that needs a real workspace ID uses `provider_config { workspace_id }` against the existing account-console provider — no second workspace-scoped provider needed). Real-apply-verified against `isolated-proof` (§8 milestone 23), not just `terraform plan`. |
-| `modules/aws/databricks-account/`, `modules/aws/databricks-workspace/` | **Empty — not started, scope clarified** | Reserved for genuinely account-wide/workspace-hardening SRA features not yet requested (legacy feature disabling, compliance security profile, enhanced security monitoring, audit log delivery, user assignment, network policy) — **not** Unity Catalog, which went into the two `unity-catalog-*` modules above instead (§8 milestone 19 resolves an ambiguity that existed in §7's own notes about where UC code should live). |
+| `modules/aws/workspace-hardening/` | **New, §8 milestone 38** | Per-workspace government-readiness hardening: Compliance Security Profile, Enhanced Security Monitoring, and Automatic Cluster Update workspace settings (all three gated together behind `compliance_standards` being non-empty, since all three sit behind Databricks' paid "Enhanced Security and Compliance" add-on), plus unconditional `disable_legacy_access`/`disable_legacy_dbfs` settings. Same `databricks.mws` + `provider_config { workspace_id }` pattern as the Unity Catalog modules; composed into `modules/aws/workspace-deployment` after `databricks_mws_workspaces.this` exists. Azure's equivalent is not a separate module — see `modules/azure/workspace-deployment`'s row below. |
+| `modules/aws/databricks-account/`, `modules/aws/databricks-workspace/` | **Empty — not started, scope clarified** | Reserved for genuinely account-*wide*, shared-state SRA features (account-level `disable_legacy_features`, account network egress policy, audit log delivery, user assignment) — **not** Unity Catalog (§8 milestone 19) and **not** the per-workspace compliance/legacy-setting hardening built in milestone 38 (`modules/aws/workspace-hardening` above, and inline in Azure's `workspace-deployment`) — those are workspace-scoped and needed no shared state. These two directories stay empty until a real shared-state design (`infrastructure/platform/`) exists for the genuinely account-wide items. |
 | `resolver/__pycache__` | n/a | Build artifact, should be gitignored if not already. |
 
 ## 4. Already-applied AWS resources — do not recreate
@@ -2958,6 +2959,169 @@ Priority order agreed on:
       as the original workspace-creation spike), since this was an
       explicit one-off validation, not a workspace meant to be
       redeployed later the way `isolated-proof` is.
+38. **Government-readiness hardening, Phase 1 (per-workspace, both
+    clouds)** (2026-10-20). Triggered directly by the user asking whether
+    these workspaces are secure enough for a government agency, pointing
+    at `databricks/terraform-databricks-sra` as the reference baseline.
+    A gap analysis grounded in SRA's own source (not memory) found this
+    factory already matches SRA's network-isolation/encryption posture
+    on both clouds, but had **none** of SRA's governance/compliance
+    hardening: Compliance Security Profile (CSP — the feature most
+    directly tied to FedRAMP/HIPAA/etc.), Enhanced Security Monitoring
+    (ESM), Automatic Cluster Update (ACU), legacy-feature disabling, or
+    TLS-enforcement on the AWS root bucket. Scoped deliberately narrower
+    than "deploy all of SRA": SRA's AWS GovCloud/Azure Government
+    sovereign-boundary plumbing (ARN partitions, Gov/DoD control-plane
+    hosts, `azure_environment` threading) is a **separate, later phase**,
+    not addressed here — this milestone is hardening only, independent of
+    which cloud boundary a workspace eventually runs in.
+    - **Three scope decisions made with the user (`AskUserQuestion`)
+      before building**: (a) Phase 1 is per-workspace only — several SRA
+      features are account-wide/shared state (account-level
+      `disable_legacy_features`, account network egress policy, audit
+      log delivery) and need a real shared-state design
+      (`infrastructure/platform/`) first; deferred to a separate
+      follow-up, not bolted on here. (b) `governance.compliance_standards`
+      is a requester-controlled, optional request-level field (list of
+      strings, e.g. `["HIPAA"]`) — same passthrough treatment as the
+      existing `governance.catalog_admin_principal`, since only the
+      requester knows what regulatory context a workspace needs. (c)
+      Azure's NSG rule ownership stays Azure-managed this pass — SRA sets
+      `network_security_group_rules_required = "NoAzureDatabricksRules"`
+      (customer owns every NSG rule), but milestone 37's baseline-NSG
+      cluster spike succeeded without it, meaning Azure likely
+      auto-injects the rules it needs behind Terraform's back; flagged
+      as a real compliance tradeoff for a later phase, not changed here.
+    - **A real, cost-relevant nuance found while researching**: per
+      Databricks' own docs, CSP is billed under the paid "Enhanced
+      Security and Compliance" add-on, and enabling it **auto-enables**
+      ESM and ACU as a side effect. Rather than make ESM/ACU
+      unconditionally-on the way SRA's own template does, all three are
+      gated together behind a single opt-in (`compliance_standards`
+      non-empty) — avoids silently adding billing exposure to every
+      workspace. Legacy-feature disabling and the AWS TLS-deny bucket
+      policy have no billing tie, so those stay unconditional.
+    - **Schema/resolver/tfvars layer**: new optional
+      `governance.compliance_standards` (array of strings, no enum —
+      Databricks' own `ComplianceStandard` enum is authoritative, not
+      duplicated here) in both `schemas/workspace-request.schema.json`
+      and `schemas/normalized-config.schema.json`. `resolver.py` copies
+      it through exactly like `catalog_admin_principal`. Both
+      `generate_tfvars.py` (AWS) and `generate_tfvars_azure.py` (Azure)
+      pop it out of the `governance` dict into its own top-level tfvars
+      key (unconditionally computed, not nested inside the Unity Catalog
+      branch — compliance hardening is UC-independent).
+    - **New `modules/aws/workspace-hardening/`**: five resources, all via
+      the existing `databricks.mws` provider +
+      `provider_config { workspace_id = ... }` pattern every UC resource
+      already uses —
+      `databricks_compliance_security_profile_workspace_setting`,
+      `_enhanced_security_monitoring_workspace_setting`,
+      `_automatic_cluster_update_workspace_setting` (all three
+      `count`-gated on `compliance_standards` being non-empty), plus
+      unconditional `_disable_legacy_access_setting`/
+      `_disable_legacy_dbfs_setting`. Composed into
+      `modules/aws/workspace-deployment` after
+      `databricks_mws_workspaces.this` exists (workspace-scoped
+      settings, same ordering as the UC modules).
+    - **AWS root-bucket TLS hardening** (`modules/aws/workspace-deployment/s3.tf`):
+      a new `aws_iam_policy_document.workspace_root_hardened` merges the
+      existing Databricks-generated bucket policy (via
+      `source_policy_documents`) with an explicit `DenyInsecureTransport`
+      statement (`aws:SecureTransport == false` → deny `s3:*`), keeping
+      Databricks' required statements intact rather than replacing them.
+      `aws_s3_bucket_policy.workspace_root` now uses this merged document.
+      **Deliberately not adopting** SRA's workspace-id-scoped write
+      restriction (exact bucket path patterns like
+      `<region>-prod/<workspace_id>/*`) — those are Databricks
+      control-plane implementation details that could be wrong or drift;
+      flagged as a follow-up, not silently copied.
+    - **Azure hardening** (`modules/azure/workspace-deployment/main.tf`):
+      extended the existing `azurerm_databricks_workspace.this` resource
+      directly (no new resource needed — these are native blocks on the
+      ARM resource already there) with
+      `default_storage_firewall_enabled = true` (unconditional, no
+      billing tie) and a native `enhanced_security_compliance` block
+      (`automatic_cluster_update_enabled`/`compliance_security_profile_enabled`/
+      `compliance_security_profile_standards`/`enhanced_security_monitoring_enabled`,
+      all gated on `compliance_standards` non-empty) — a notably simpler
+      shape than AWS's three separate resources, since Azure exposes the
+      same concept as one block on the workspace resource itself. **Real
+      `terraform validate` finding**: `default_storage_firewall_enabled`
+      requires `access_connector_id` to be set (so Databricks' control
+      plane can still reach the auto-created DBFS root storage account
+      once firewalled) — fixed by adding a new, dedicated
+      `azurerm_databricks_access_connector.dbfs` (SystemAssigned
+      identity), separate from `modules/azure/unity-catalog-data`'s own
+      access connector (a different storage account entirely). Two new
+      root-level resources in `infrastructure/azure/workspace/main.tf`
+      (not inside the deployment module — same provider-placement
+      constraint already documented for Unity Catalog):
+      `databricks_disable_legacy_access_setting`/
+      `_disable_legacy_dbfs_setting`, both `provider = databricks.workspace`,
+      `depends_on = [module.deployment]`.
+    - **Real entitlement blocker found on AWS, not on Azure** — same
+      class of finding as the earlier PrivateLink/Enterprise-tier
+      blocker (§5.11): a real-apply attempt against a throwaway
+      `hardening-spike` workspace on this project's test AWS Databricks
+      account (`eddbb85f-...`/`TSA` profile) failed CSP/ESM/ACU with
+      *"Workspace has not purchased Enhanced Security Compliance SKU"* —
+      an account-tier limitation, not a code bug (confirmed via
+      `terraform state list` that none of the three ever entered state).
+      The identical Azure spike, on a different subscription, succeeded
+      — all five hardening resources (CSP, ESM, ACU,
+      `disable_legacy_access`, `disable_legacy_dbfs`) plus the DBFS
+      storage firewall verified live via CLI JSON output. **Net result:
+      every new resource type introduced by this milestone is now
+      real-apply-verified on at least one cloud**; AWS's CSP/ESM/ACU
+      specifically remain plan-verified-but-not-apply-verified, blocked
+      purely by this test account's entitlement, not by anything in the
+      code.
+    - **Real one-way-lock finding on both clouds' teardown** — exactly
+      matching a documented comment already present in SRA's own
+      `disable_legacy_settings/main.tf` source: once
+      `disable_legacy_access`/`disable_legacy_dbfs` are enabled on a
+      workspace, Databricks **permanently locks** them —
+      `terraform destroy` fails with *"This setting cannot be modified or
+      deleted for this
+      [account|workspace]."* on both. SRA's own fix, applied here on
+      both the AWS spike and the Azure spike: `terraform state rm` on
+      both resources before destroying, since the setting becoming
+      "stuck" (still enabled) is harmless once the whole workspace is
+      being torn down anyway. **Anyone destroying a real workspace that
+      has `compliance_standards`-style hardening applied (or just the
+      always-on legacy-setting disables) must run this `state rm` step
+      first** — otherwise `terraform destroy` partially fails every
+      time. Worth a wrapper/documented runbook step if this becomes
+      routine; not built as of this milestone.
+    - **Explicitly deferred, not forgotten** (separate follow-up phases):
+      account-level `disable_legacy_features`, account network egress
+      policy (`databricks_account_network_policy`), audit log delivery
+      (`databricks_mws_log_delivery`) — all need a real shared-state
+      design first. AWS GovCloud / Azure Government sovereign-boundary
+      plumbing. Azure `network_security_group_rules_required =
+      "NoAzureDatabricksRules"` / full customer NSG ownership. AWS
+      root-bucket workspace-id-scoped write restriction beyond the TLS
+      deny. Security Analysis Tool (SAT) integration on either cloud.
+    - Verified: `terraform fmt -check -recursive`/`terraform validate`
+      clean on both roots (standalone per-module validate of
+      `modules/aws/workspace-hardening`/`modules/aws/workspace-deployment`
+      shows the already-known, non-issue `configuration_aliases`
+      false-alarm when validated in isolation — the full-root validate
+      is the real check). Regenerated tfvars for every real/historical
+      workspace deployment directory still committed — byte-identical
+      (none set `compliance_standards`, confirming this pass was purely
+      additive). One throwaway spike per cloud
+      (`hardening-spike`, both AWS and Azure), each applied for real,
+      then fully torn down: AWS — 27 resources destroyed (after the
+      `state rm` workaround); Azure — 9 resources destroyed in the
+      deployment module/root (after the same workaround), plus the usual
+      Databricks-managed resource-group orphan
+      (`rg-hardening-spike-managed`) manually deleted, same standing
+      step as every prior Azure teardown in this project (§8 milestones
+      35, 37). Both spikes' request/normalized/deployment files were
+      deleted rather than committed, same "leaves no trace" convention
+      as every other throwaway spike.
 
 ## 9. Conventions observed (keep consistent)
 

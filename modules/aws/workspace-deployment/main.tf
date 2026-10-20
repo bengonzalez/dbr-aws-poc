@@ -256,3 +256,16 @@ module "unity_catalog_workspace" {
     module.unity_catalog_data
   ]
 }
+
+# Government-readiness hardening (CLAUDE.md §8) - workspace-scoped settings,
+# independent of Unity Catalog, so not gated on var.governance.unity_catalog.
+module "workspace_hardening" {
+  source = "../workspace-hardening"
+
+  providers = {
+    databricks.mws = databricks.mws
+  }
+
+  databricks_workspace_id = databricks_mws_workspaces.this.workspace_id
+  compliance_standards    = var.compliance_standards
+}

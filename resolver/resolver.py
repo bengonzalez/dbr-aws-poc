@@ -271,7 +271,7 @@ def resolve_configuration(
 
     request_governance = request.get("governance", {})
 
-    for key in ("catalog_admin_principal", "existing_metastore_id"):
+    for key in ("catalog_admin_principal", "compliance_standards", "existing_metastore_id"):
         if key in request_governance:
             governance[key] = request_governance[key]
 

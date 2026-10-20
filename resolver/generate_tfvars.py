@@ -384,16 +384,17 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
             for key, value in normalized["encryption"].items()
             if key not in KMS_PASSTHROUGH_KEYS
         },
-        # catalog_admin_principal/existing_metastore_id (when present) are
-        # surfaced separately as their own top-level vars below -
-        # var.governance's object type doesn't declare either, since
-        # they're consumed directly by modules/unity-catalog-workspace /
+        # catalog_admin_principal/compliance_standards/existing_metastore_id
+        # (when present) are surfaced separately as their own top-level
+        # vars below - var.governance's object type doesn't declare any of
+        # them, since they're consumed directly by modules/aws/
+        # unity-catalog-workspace / modules/aws/workspace-hardening /
         # inventory.resolve_metastore_id(), not by the governance-shaped
         # resolver output itself.
         "governance": {
             key: value
             for key, value in normalized["governance"].items()
-            if key not in ("catalog_admin_principal", "existing_metastore_id")
+            if key not in ("catalog_admin_principal", "compliance_standards", "existing_metastore_id")
         },
         "compute": normalized["compute"],
         "logging": normalized["logging"],
@@ -523,6 +524,16 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
 
         if value is not None:
             tfvars[key] = value
+
+    # Optional: regulatory compliance standards (CLAUDE.md §8 - government-
+    # readiness hardening). Independent of Unity Catalog - gates Compliance
+    # Security Profile/Enhanced Security Monitoring/Automatic Cluster
+    # Update in modules/aws/workspace-hardening, so it's popped out
+    # unconditionally, not nested inside the unity_catalog branch below.
+    compliance_standards = normalized["governance"].get("compliance_standards")
+
+    if compliance_standards:
+        tfvars["compliance_standards"] = compliance_standards
 
     if normalized["governance"]["unity_catalog"]:
         region = normalized["cloud"]["region"]

@@ -338,6 +338,13 @@
           "type": "string",
           "minLength": 1
         },
+        "compliance_standards": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "existing_metastore_id": {
           "type": "string",
           "minLength": 1

@@ -46,9 +46,41 @@ data "databricks_aws_bucket_policy" "workspace_root" {
   databricks_e2_account_id = var.databricks_account_id
 }
 
+# Government-readiness hardening (CLAUDE.md §8): merge the Databricks-
+# required statements with an explicit deny-non-TLS statement, rather than
+# using the Databricks-generated policy as-is. source_policy_documents
+# keeps every Databricks-required statement intact - this only adds to it,
+# never replaces it.
+data "aws_iam_policy_document" "workspace_root_hardened" {
+  source_policy_documents = [data.databricks_aws_bucket_policy.workspace_root.json]
+
+  statement {
+    sid    = "DenyInsecureTransport"
+    effect = "Deny"
+
+    actions = ["s3:*"]
+
+    resources = [
+      aws_s3_bucket.workspace_root.arn,
+      "${aws_s3_bucket.workspace_root.arn}/*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
 resource "aws_s3_bucket_policy" "workspace_root" {
   bucket = aws_s3_bucket.workspace_root.id
-  policy = data.databricks_aws_bucket_policy.workspace_root.json
+  policy = data.aws_iam_policy_document.workspace_root_hardened.json
 
   depends_on = [
     aws_s3_bucket_public_access_block.workspace_root

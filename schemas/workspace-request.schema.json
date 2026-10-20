@@ -269,6 +269,15 @@
           "description": "A Databricks user name, group name, or service principal application ID to grant ALL_PRIVILEGES on this workspace's Unity Catalog catalog. Optional - omit to leave the catalog ungranted (owner defaults to whoever runs terraform apply)."
         },
 
+        "compliance_standards": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Regulatory compliance standards this workspace must satisfy (e.g. 'HIPAA', 'PCI_DSS', 'FEDRAMP_MODERATE', 'FEDRAMP_HIGH', 'IRAP' - see the Databricks provider's ComplianceStandard enum for valid values, not re-validated here). Optional - omitting this (the default) leaves Compliance Security Profile, Enhanced Security Monitoring, and Automatic Cluster Update all off, since enabling them incurs the Enhanced Security and Compliance billing add-on. Only the requester knows what regulatory context a workspace actually needs."
+        },
+
         "existing_metastore_id": {
           "type": "string",
           "minLength": 1,

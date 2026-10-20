@@ -51,3 +51,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "compliance_standards" {
+  description = "Regulatory compliance standards this workspace must satisfy (e.g. HIPAA, PCI_DSS, FEDRAMP_MODERATE, FEDRAMP_HIGH, IRAP). Empty (default) leaves Compliance Security Profile, Enhanced Security Monitoring, and Automatic Cluster Update all off."
+  type        = list(string)
+  default     = []
+}

@@ -82,6 +82,7 @@ def build_tfvars_azure(normalized: dict, deployment: dict) -> dict:
 
     governance = {**normalized["governance"]}
     catalog_admin_principal = governance.pop("catalog_admin_principal", None)
+    compliance_standards = governance.pop("compliance_standards", None) or []
 
     # var.cloud (infrastructure/workspace-azure) only declares
     # provider/region - no account/subscription id, same posture as the
@@ -115,6 +116,9 @@ def build_tfvars_azure(normalized: dict, deployment: dict) -> dict:
 
     if catalog_admin_principal is not None:
         tfvars["catalog_admin_principal"] = catalog_admin_principal
+
+    if compliance_standards:
+        tfvars["compliance_standards"] = compliance_standards
 
     return tfvars
 
