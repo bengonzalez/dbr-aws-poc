@@ -3227,3 +3227,106 @@ Priority order agreed on:
   Terraform CLI workspaces and per-workspace directories before landing
   here — see §8 milestones 10, 12, and 13 for why each prior layout was
   superseded.)
+
+## 10. Open backlog (prioritized — pick up here after a reboot)
+
+Everything below is deferred work, not forgotten work — each item was
+explicitly scoped out of an earlier milestone rather than overlooked.
+Consolidated here from milestone 35's Azure scope boundary and
+milestone 38's government-readiness Phase 1 plan so the full backlog
+lives in one place instead of scattered across individual milestone
+writeups. Order reflects the sequence these were raised/deferred in,
+not a hard mandate — re-prioritize anytime, but update this list when
+you do, and cross an item off (move it to a §8 milestone) rather than
+deleting it silently.
+
+1. **Account-level/shared-state SRA features** (government-readiness
+   Phase 2, deferred from milestone 38). Three things SRA does at the
+   Databricks *account* level, not per-workspace: account-level
+   `disable_legacy_features`, an account network egress policy
+   (`databricks_account_network_policy`), and audit log delivery
+   (`databricks_mws_log_delivery`). All three are shared state — one
+   setting affects every current and future workspace on that
+   Databricks account — which is exactly what `infrastructure/platform/`
+   was reserved for but never built (§3's row for that directory).
+   **This needs a real shared-state design first** (a new Terraform
+   root/backend for account-level resources, decoupled from any one
+   workspace's state) before any of the three can be implemented
+   safely. Do this design conversation before writing any `.tf` for
+   this item.
+2. **AWS GovCloud / Azure Government sovereign-boundary plumbing**
+   (deferred from milestone 38, the most directly relevant item to
+   this project's original "government agency" framing, but
+   deliberately kept separate from Phase 1's hardening-feature work).
+   AWS: `databricks_gov_shard` (civilian/dod), ARN partition handling
+   (`aws-us-gov`/`aws-us-gov-dod` vs. commercial `aws`), separate
+   Databricks control-plane hosts (`accounts.cloud.databricks.us`,
+   `accounts-dod.cloud.databricks.mil`), region-keyed PrivateLink/
+   log-bucket/system-table-bucket name lookups for GovCloud regions —
+   all verified present in SRA's own source (§7), none of it exists in
+   this factory yet. Azure: a dedicated `azure_environment` variable
+   (`public`/`usgovernment`) threaded into every `azurerm`/`azapi`/
+   `azuread`/`databricks` provider block. Real scope question to
+   resolve before building: does this project have access to an actual
+   GovCloud/Azure Government subscription to verify against, the same
+   way every other milestone in this project has insisted on a real
+   apply over plan-only speculation?
+3. **Azure NSG rule ownership** (`network_security_group_rules_required
+   = "NoAzureDatabricksRules"`, deferred from milestone 38's explicit
+   scope decision 3). SRA sets this so the customer owns every NSG
+   rule; this factory's baseline-NSG cluster spike (§8 milestone 37)
+   proved clusters work fine *without* it, meaning Azure most likely
+   auto-injects rules behind Terraform's back today. Real compliance
+   tradeoff (full customer ownership vs. Azure-managed convenience),
+   not yet changed.
+4. **AWS root-bucket workspace-id-scoped write restriction** (deferred
+   from milestone 38). SRA scopes the root bucket policy to the exact
+   bucket path pattern a specific `workspace_id` writes to
+   (`<region>-prod/<workspace_id>/*` etc.), tighter than this factory's
+   current TLS-deny-only hardening (milestone 38). Deliberately not
+   adopted yet — those exact path patterns are Databricks control-plane
+   implementation details that could be wrong or drift, and getting
+   them wrong risks breaking the workspace's own root storage writes.
+5. **Security Analysis Tool (SAT) integration**, either cloud (deferred
+   from milestone 38) — optional Databricks self-assessment tooling,
+   not a hard control; lowest priority of the government-readiness
+   follow-ups.
+6. **Azure existing-VNet reuse** (a `custom`-strategy equivalent for
+   Azure, deferred from milestone 35's scope boundary). Today Azure
+   only supports `isolated` (always a brand-new, Terraform-owned VNet)
+   — no bring-your-own-VNet path exists the way AWS's `custom` strategy
+   has had since early in this project. Would need the same
+   existing-or-create variable pattern (§9) applied to
+   `modules/azure/workspace-network`.
+7. **Azure customer-managed encryption** (Key Vault CMK for workspace/
+   managed-services data, deferred from milestone 35). Azure's
+   `encryption.workspace`/`application_data` are hardcoded to
+   `platform_managed` today; `generate_tfvars_azure.py` actively
+   rejects `customer_managed` with a clear error rather than silently
+   ignoring it.
+8. **`validate_deployment.py` Azure support** (deferred from
+   milestone 35) — the workspace-level validation harness (§8
+   milestone 23) is AWS-only; Azure workspaces have no equivalent
+   post-apply check today.
+9. **`governance.workspace_binding`'s per-environment differentiation**
+   (open since §5.14 / milestone 19 — the oldest item on this list).
+   Every workspace's catalog is unconditionally `ISOLATED` regardless
+   of this resolved-but-unconsumed field. Still no concrete need for
+   cross-workspace catalog access has come up; if one does, the safe
+   direction is opt-in `databricks_workspace_binding` exceptions to
+   isolation, not relaxing the default.
+10. **Azure NAT/firewall path for cluster egress** — milestone 37's
+    real cluster test found Azure's default per-subnet outbound
+    internet access makes this unnecessary *today*, so this is now
+    "verified unneeded," not "missing" — listed here only as a
+    trigger: revisit if Azure ever changes that default, or if a
+    client's own Azure Policy disables default outbound access
+    tenant-wide (would silently break cluster egress with no
+    Terraform-visible symptom).
+11. **Backend-config file necessity** (open review item from milestone
+    33) — whether `backend.tfbackend` files need to be generated-and-
+    committed at all, given every value in them is mechanically
+    derivable (`bucket`/`region`/`use_lockfile`/`resource_group_name`/
+    etc. are constants; a workspace's `key` is always
+    `<environment>/<name>/terraform.tfstate`). Lowest-priority item on
+    this list — a tooling nicety, not a capability gap.
