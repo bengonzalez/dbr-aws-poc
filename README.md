@@ -40,11 +40,12 @@ under `azure/` wherever it appears (`modules/azure/...`,
 │       └── TEMPLATE.yaml
 │
 ├── normalized/                      # Resolver output - the fully resolved
-│   └── <name>.yaml                  # "contract" for one workspace (generated, flat -
-│                                     #   workspace names are already globally unique)
+│   ├── aws/<name>.yaml              # "contract" for one workspace (generated, cloud-
+│   └── azure/<name>.yaml            #   scoped - a workspace name is conventionally
+│                                     #   unique per provider, not globally)
 │
 ├── resolver/                        # Python pipeline (request → Terraform inputs)
-│   ├── main.py                      # workspace-request → normalized/<name>.yaml
+│   ├── main.py                      # workspace-request → normalized/<provider>/<name>.yaml
 │   ├── resolver.py                  # core resolution logic (profiles + policies)
 │   ├── loader.py / validator.py     # YAML loading + JSON Schema validation
 │   ├── generate_tfvars.py           # normalized + deployment.yaml → terraform.tfvars.json
@@ -201,7 +202,7 @@ Run these from the repository root unless noted otherwise.
    ```
    python resolver/main.py --request workspace-requests/aws/<env>/<name>.yaml --account <aws_account_id>
    ```
-   Produces `normalized/<name>.yaml` — the fully resolved configuration.
+   Produces `normalized/aws/<name>.yaml` — the fully resolved configuration.
 
 3. **Write the deployment file (usually just an `api_version: v1` stub).**
    A normal workspace needs **no edits here at all** — every concrete
@@ -302,7 +303,7 @@ Run these from the repository root unless noted otherwise.
   and creating this one instead. This is the single most important rule
   in this repository.
 - **Never hand-edit `terraform.tfvars.json` or either `backend.tfbackend`
-  file.** All three are generated from `normalized/<name>.yaml` and
+  file.** All three are generated from `normalized/aws/<name>.yaml` and
   `deployment.yaml`. Manual edits will silently drift from the source of
   truth and be overwritten the next time someone regenerates them.
 - **Always read the plan before applying.** An unexpected `destroy` in the
@@ -367,7 +368,7 @@ pipeline run should operate on exactly one workspace.
 artifacts):
 
 1. **resolve** — run `resolver/main.py` for the changed request. Artifact:
-   `normalized/<name>.yaml`.
+   `normalized/<provider>/<name>.yaml`.
 2. **generate** — run `generate_tfvars.py` and `generate_backend_config.py`.
    Artifacts: `infrastructure/deployments/aws/<env>/<name>/terraform.tfvars.json`,
    `.../backend.tfbackend`, and `infrastructure/aws/workspace/backend.tfbackend`.
