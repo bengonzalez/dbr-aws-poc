@@ -1,0 +1,7 @@
+# Copy this file to local.auto.tfvars (gitignored, never commit it) and set
+# your own Databricks CLI account-console profile name. Terraform
+# auto-loads local.auto.tfvars alongside whatever -var-file you pass, so
+# you never need to pass databricks_profile yourself. Same convention as
+# infrastructure/aws/workspace/local.auto.tfvars.example.
+
+databricks_profile = "your-databricks-cli-account-console-profile-name"

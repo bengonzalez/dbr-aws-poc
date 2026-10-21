@@ -15,6 +15,7 @@ from inventory import (
     resolve_databricks_account_id,
     resolve_existing_vpc_cidr,
     resolve_metastore_id,
+    resolve_network_policy_id,
     resolve_platform_network,
     resolve_route_table_ids,
     subnet_defaults_for,
@@ -534,6 +535,21 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
 
     if compliance_standards:
         tfvars["compliance_standards"] = compliance_standards
+
+    # Optional: account-level network policy to attach (CLAUDE.md §10
+    # backlog item #1 / §8 milestone 39). Independent of Unity Catalog and
+    # keyed only by Databricks account id, not region - popped out
+    # unconditionally for the same reason compliance_standards is. Never
+    # required - resolve_network_policy_id() returns None, not an error,
+    # when nothing is set anywhere.
+    network_policy_id = resolve_network_policy_id(
+        databricks_account_id,
+        deployment,
+        inventory,
+    )
+
+    if network_policy_id:
+        tfvars["network_policy_id"] = network_policy_id
 
     if normalized["governance"]["unity_catalog"]:
         region = normalized["cloud"]["region"]

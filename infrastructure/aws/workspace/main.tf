@@ -39,4 +39,5 @@ module "deployment" {
   existing_metastore_id                = var.existing_metastore_id
   catalog_admin_principal              = var.catalog_admin_principal
   compliance_standards                 = var.compliance_standards
+  network_policy_id                    = var.network_policy_id
 }

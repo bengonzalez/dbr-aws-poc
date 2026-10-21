@@ -269,3 +269,22 @@ module "workspace_hardening" {
   databricks_workspace_id = databricks_mws_workspaces.this.workspace_id
   compliance_standards    = var.compliance_standards
 }
+
+# Attaches this workspace to an account-level network policy (CLAUDE.md
+# §10 backlog item #1 / §8 milestone 39), when one is resolved for it.
+# Real finding worth remembering: there is no network_policy_id argument
+# on databricks_mws_workspaces itself (checked the provider's own docs
+# directly, not assumed from a quick read of SRA's source) - a separate
+# resource, databricks_workspace_network_option, is required, and its own
+# docs say it "cannot be created or deleted," only updated - every
+# workspace always has exactly one network policy (default-policy unless
+# changed), so this resource just points that association at a different
+# policy once the workspace exists.
+resource "databricks_workspace_network_option" "this" {
+  count = var.network_policy_id != null ? 1 : 0
+
+  provider = databricks.mws
+
+  workspace_id      = databricks_mws_workspaces.this.workspace_id
+  network_policy_id = var.network_policy_id
+}

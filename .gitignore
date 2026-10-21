@@ -39,8 +39,11 @@ __pycache__/
 # run through the same Terraform root (no Azure equivalent - its root
 # authenticates via auth_type = "azure-cli" instead, see CLAUDE.md §8
 # milestone 35). TF_VAR_databricks_profile (env var) works just as well and
-# needs no file at all.
+# needs no file at all. infrastructure/aws/account/ (§10 backlog item #1 /
+# §8 milestone 39) is the same pattern for the account-level shared-state
+# root.
 infrastructure/aws/workspace/**/local.auto.tfvars
+infrastructure/aws/account/**/local.auto.tfvars
 
 # Point-in-time reports from resolver/validate_deployment.py
 # (validation.evidence == "required"). Not source config - never commit.

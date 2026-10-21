@@ -132,7 +132,7 @@ requirements, security controls, Terraform behavior.
 | Path | Status | Notes |
 |---|---|---|
 | `workspace-requests/aws/{dev,stage,live}/` | Working | Minimal requester input YAML. One `document-ai` request per env exists as the test case. `dev/azure-isolated-proof.yaml` (§8 milestone 35) is the first Azure request — resolved and plan-verified (17-resource clean create plan), **not yet applied for real** — see milestone 35 for why that's an explicit, separate next step. |
-| `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`, `validate_deployment.py`, `inventory.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `inventory.py` holds shared `platform/inventory/aws.yaml` lookups (`resolve_metastore_id()`, `find_primary_network()`, `resolve_platform_network()`, `subnet_defaults_for()`, `allocate_subnets()`, `resolve_existing_vpc_cidr()` — milestone 28; `resolve_databricks_account_id()` — milestone 29; `resolve_route_table_ids()` — milestone 30, consolidated/renamed from `route_table_ids_known()` in milestone 31) — centralized here, not in `generate_tfvars.py`, specifically to avoid a circular import with `check_cidr_allocations.py`. `generate_tfvars.py` turns normalized + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/aws/<env>/<name>/` (§8 milestone 13); its metastore and VPC/route-table lookups both come from `inventory.py` (§8 milestones 23, 25); its `ensure_subnet_allocation()` (§8 milestone 28) auto-carves and permanently pins subnet CIDRs into a sibling generated `allocated-subnets.yaml` file whenever a workspace's `deployment.yaml` doesn't hand-type its own `network.subnets.private`; `main()` now resolves `databricks_account_id` once up front (deployment override > request > inventory default, §8 milestone 29) before either of those run; its `resolve_network_ownership()` (§8 milestones 9, 30) now infers `routing_ownership`/`endpoints_ownership` from whether route table ids are actually known for the VPC in play, rather than a blind per-strategy default, and `build_tfvars()` always forwards all three ownership overrides explicitly (not just when set in `deployment.yaml`) so Terraform's own `locals.tf` coalesce can't diverge from the inference. `generate_backend_config.py` turns `normalized/<provider>/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/aws/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/aws/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (§8 milestones 14, 25, 28) scans every committed `deployment.yaml` for CIDR collisions/pool violations, falling back to `inventory.py`'s lookup when a workspace's `deployment.yaml` omits `platform.vpc_id`, and (§8 milestone 28) merging in a workspace's `allocated-subnets.yaml` and the request's own `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` passthroughs when present; exposes `vpc_scope()`/`used_subnets_for_scope()` for `generate_tfvars.py`'s allocator to reuse; called automatically by `generate_tfvars.py` before (and after a first-time allocation) it writes tfvars. `validate_deployment.py` (§8 milestones 23-24, 29) checks a *deployed* workspace's live AWS/Databricks state against what was resolved for it — run manually, post-apply, not wired into anything automatically; its optional `--workspace-profile` additionally verifies live catalog isolation/storage via a workspace-scoped profile (§8 milestone 24); now resolves `databricks_account_id` the same 3-tier way as `generate_tfvars.py` instead of reading `deployment.yaml` directly (§8 milestone 29). As of §8 milestone 35, `generate_tfvars.py`'s `main()` dispatches on `normalized["cloud"]["provider"]` to either its own AWS body (extracted unchanged into `_main_aws()`) or a new sibling module `resolver/generate_tfvars_azure.py`'s `main_azure()`/`build_tfvars_azure()` — deliberately not interleaved as `if`/`else` branches inside this file's existing AWS-shaped functions, same "parallel cloud-specific code" principle as the Terraform module layer below. `resolver/main.py` and `resolver.py` themselves gained one small provider-generic change each (inventory file selection; the one AWS-hardcoded inventory block in `resolve_configuration()`) rather than a parallel file, since both were already cloud-agnostic apart from that one spot. See §5 gaps. |
+| `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`, `validate_deployment.py`, `inventory.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `inventory.py` holds shared `platform/inventory/aws.yaml` lookups (`resolve_metastore_id()`, `find_primary_network()`, `resolve_platform_network()`, `subnet_defaults_for()`, `allocate_subnets()`, `resolve_existing_vpc_cidr()` — milestone 28; `resolve_databricks_account_id()` — milestone 29; `resolve_route_table_ids()` — milestone 30, consolidated/renamed from `route_table_ids_known()` in milestone 31; `resolve_network_policy_id()` — milestone 39, never raises, unlike the others, since an unset network policy is a valid default) — centralized here, not in `generate_tfvars.py`, specifically to avoid a circular import with `check_cidr_allocations.py`. `generate_tfvars.py` turns normalized + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/aws/<env>/<name>/` (§8 milestone 13); its metastore and VPC/route-table lookups both come from `inventory.py` (§8 milestones 23, 25); its `ensure_subnet_allocation()` (§8 milestone 28) auto-carves and permanently pins subnet CIDRs into a sibling generated `allocated-subnets.yaml` file whenever a workspace's `deployment.yaml` doesn't hand-type its own `network.subnets.private`; `main()` now resolves `databricks_account_id` once up front (deployment override > request > inventory default, §8 milestone 29) before either of those run; its `resolve_network_ownership()` (§8 milestones 9, 30) now infers `routing_ownership`/`endpoints_ownership` from whether route table ids are actually known for the VPC in play, rather than a blind per-strategy default, and `build_tfvars()` always forwards all three ownership overrides explicitly (not just when set in `deployment.yaml`) so Terraform's own `locals.tf` coalesce can't diverge from the inference. `generate_backend_config.py` turns `normalized/<provider>/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/aws/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/aws/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (§8 milestones 14, 25, 28) scans every committed `deployment.yaml` for CIDR collisions/pool violations, falling back to `inventory.py`'s lookup when a workspace's `deployment.yaml` omits `platform.vpc_id`, and (§8 milestone 28) merging in a workspace's `allocated-subnets.yaml` and the request's own `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` passthroughs when present; exposes `vpc_scope()`/`used_subnets_for_scope()` for `generate_tfvars.py`'s allocator to reuse; called automatically by `generate_tfvars.py` before (and after a first-time allocation) it writes tfvars. `validate_deployment.py` (§8 milestones 23-24, 29) checks a *deployed* workspace's live AWS/Databricks state against what was resolved for it — run manually, post-apply, not wired into anything automatically; its optional `--workspace-profile` additionally verifies live catalog isolation/storage via a workspace-scoped profile (§8 milestone 24); now resolves `databricks_account_id` the same 3-tier way as `generate_tfvars.py` instead of reading `deployment.yaml` directly (§8 milestone 29). As of §8 milestone 35, `generate_tfvars.py`'s `main()` dispatches on `normalized["cloud"]["provider"]` to either its own AWS body (extracted unchanged into `_main_aws()`) or a new sibling module `resolver/generate_tfvars_azure.py`'s `main_azure()`/`build_tfvars_azure()` — deliberately not interleaved as `if`/`else` branches inside this file's existing AWS-shaped functions, same "parallel cloud-specific code" principle as the Terraform module layer below. `resolver/main.py` and `resolver.py` themselves gained one small provider-generic change each (inventory file selection; the one AWS-hardcoded inventory block in `resolve_configuration()`) rather than a parallel file, since both were already cloud-agnostic apart from that one spot. See §5 gaps. |
 | `resolver/generate_tfvars_azure.py` | **New, §8 milestone 35** | Azure's tfvars generation - much smaller than the AWS path's `generate_tfvars.py` given the deliberately bounded scope (no subnet allocation/collision checking, no VPC/routing/SG/endpoints ownership inference, no KMS bring-your-own-key): `derive_subnet_cidrs()` carves the two fixed `/24` subnets Azure's VNet-injection model needs straight out of `network.vpc_cidr` (no AZ-scoped `subnet_defaults` inventory lookup - Azure subnets aren't AZ-scoped the way AWS's are), and `build_tfvars_azure()` rejects `network.strategy != "isolated"` and `encryption.workspace == "customer_managed"` with clear errors (both explicitly deferred - see §8 milestone 35). |
 | `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. `workspace-request.schema.json` gained optional `network.connectivity` (§8 milestone 27); `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` (§8 milestone 28); and, §8 milestone 29, `network.existing_security_group_id`, a new top-level `encryption` object (`existing_workspace_storage_key_arn`/`_alias`, `existing_managed_services_key_arn`/`_alias` — the first requester-controlled `encryption` fields; `encryption.workspace`/`application_data` stay entirely profile-derived), `governance.existing_metastore_id` (alongside the milestone-22 `catalog_admin_principal` — the first two requester-controlled `governance` fields), and `cloud.databricks_account_id`. All mirrored into `normalized-config.schema.json` too. The latter's now-dead `network.requirements.subnets.allocation` sub-schema (count/AZs/cidr_source — superseded by real auto-allocation, §8 milestone 28) was removed. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. As of §8 milestone 35, `cloud.provider`'s enum gained `"azure"` (both schemas) and `normalized-config.schema.json`'s `cloud.account` pattern was relaxed to accept either a 12-digit AWS account id or a UUID-shaped Azure subscription id - no other schema change was needed since `network.vpc_cidr`/`governance.catalog_admin_principal`/etc. were already cloud-agnostic strings with no AWS-specific pattern. |
 | `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely — `policies/network.yaml`'s `allowed_strategies` is now the only thing with an opinion on network strategy per environment (§8 milestone 16). |
@@ -142,15 +142,17 @@ requirements, security controls, Terraform behavior.
 | `normalized/<provider>/*.yaml` | Working — **was silently gitignored, now fixed** | Resolver output per workspace request. `CLAUDE.md` previously (incorrectly) stated these were committed; `.gitignore` actually had a stale `normalized/` rule (its own comment called it "the normalized **virtual environment** directory," which doesn't match what's in there) that had been silently excluding every file in this directory from version control. Removed 2026-10-09 — these now will be tracked going forward. Cloud-scoped under `<provider>/` as of §8 milestone 36 (was flat `normalized/*.yaml`) — a workspace name is conventionally unique per provider, not globally; `resolver/loader.py::resolve_normalized_path()` auto-detects which provider's subdirectory a `--workspace` name lives under, erroring clearly if it exists under more than one. |
 | `infrastructure/aws/workspace/*.tf` | **One shared root for every workspace** (§8 milestone 12 — supersedes the per-directory approach from milestone 10) | `providers.tf`/`versions.tf` (the latter has a partial `backend "s3" {}` block — bucket/key/region supplied at `init` time, since Terraform backend blocks can't contain variables), `variables.tf`, `main.tf` (a single `module "deployment"` call into `modules/aws/workspace-deployment`), `outputs.tf` (forwards). No per-workspace copies of any of this — every workspace uses these exact same files; only the `-var-file` and the backend-config differ per workspace. |
 | `infrastructure/aws/workspace/backend.tfbackend` | **Working** (§8 milestone 13) | Committed, idempotently rewritten every time `generate_backend_config.py` runs for *any* workspace: `bucket`/`region`/`use_lockfile` — identical for every workspace, so this stays a single shared file instead of being repeated in each per-workspace backend-config file. Never hand-edit. |
+| `infrastructure/aws/account/*.tf` | **New, §8 milestone 39, plan-verified only** | A *second* AWS Terraform root, sibling to `infrastructure/aws/workspace/` — one per Databricks account, not one per workspace, applied independently of any workspace's lifecycle. Composes the three `modules/aws/account-*` modules below behind independent boolean toggles, all defaulting `false` (a no-op until an operator opts in — see §5/§10 backlog item #1). Same partial `backend "s3" {}` + `databricks.mws`-aliased provider shape as the workspace root, but `backend.tfbackend` here is a single hand-written, committed file (no generator script — there's no per-workspace multiplicity to justify one) and inputs come from a plain, hand-written `infrastructure/deployments/aws/account/<databricks_account_id>/terraform.tfvars.json` rather than the resolver pipeline (this isn't workspace-request-driven). `local.auto.tfvars`(gitignored)/`local.auto.tfvars.example`(committed) hold `databricks_profile`, same convention as the workspace root. |
+| `modules/aws/account-legacy-features/`, `modules/aws/account-network-policy/`, `modules/aws/account-audit-log-delivery/` | **New, §8 milestone 39, plan-verified against the real Databricks account-console API** | Account-scoped Databricks-provider modules, one per concern (mirrors SRA's own `databricks_account/*` split). `account-legacy-features`: one resource, `databricks_disable_legacy_features_setting` — distinct from `modules/aws/workspace-hardening`'s workspace-scoped `disable_legacy_access`/`disable_legacy_dbfs` (§8 milestone 38); likely a one-way lock once enabled, same as those. `account-network-policy`: `databricks_account_network_policy`, full SRA shape (egress restriction + ingress IP ACL/cross-workspace/private-access) — real finding (not SRA's older comments, the provider's own current docs): the egress restriction governs *serverless* workloads only, no effect on this factory's classic compute, so the real lockout risk is entirely on the ingress IP-ACL side. `account-audit-log-delivery`: the full SRA chain (S3 bucket, IAM role/policy, `databricks_mws_credentials`/`_storage_configurations`/`_log_delivery`). None of the three are wired into any workspace automatically — `network_policy_id` is the one value a workspace can opt into, via `platform/inventory/aws.yaml` + `resolver/inventory.py::resolve_network_policy_id()`, same auto-lookup pattern as `metastore_id`. |
 | `infrastructure/azure/workspace/*.tf` | **New, §8 milestone 35** | Azure's shared root, parallel sibling to `infrastructure/aws/workspace/` — same one-shared-root-per-cloud convention, not merged into the AWS root (the `azurerm`/`databricks` provider blocks are irreconcilable with AWS's `aws` provider block). `providers.tf` defines the `azurerm` provider (no explicit subscription id — derived from whichever `az` CLI session is active, same posture as the AWS root never passing an explicit account id to its own `aws` provider) plus an *aliased* `databricks` provider (`alias = "workspace"`, `host = "https://${module.deployment.workspace_url}"`, `auth_type = "azure-cli"`) — this provider has to live in the root rather than inside `module.deployment` itself, since Terraform does not allow a non-root module to define a provider block that references a resource it creates; that's also why this root composes Unity Catalog directly (`module.unity_catalog_data`/`module.unity_catalog_workspace`) rather than nesting that composition inside `module.deployment` the way the AWS root does. `backend "azurerm" {}` is partial, configured at `init` time via `-backend-config`, mirroring the AWS root's partial S3 backend exactly. `locals.tf` derives a valid (<=24-char, lowercase-alphanumeric) ADLS Gen2 storage account name from the workspace name plus a slice of `data.azurerm_client_config.current.subscription_id` — not guaranteed globally unique across tenants, a known, accepted limitation for this pass. |
 | `infrastructure/azure/workspace/backend.tfbackend` | **New, §8 milestone 35** | Azure's analog of the AWS root's shared backend file — `resource_group_name`/`storage_account_name`/`container_name` instead of `bucket`/`region`/`use_lockfile`. The actual Azure Storage Account for state doesn't exist yet (no real apply in this pass) — same bootstrap-ahead-of-use posture the AWS bucket had before it existed. |
 | `infrastructure/deployments/aws/<env>/<name>/deployment.yaml` / `terraform.tfvars.json` / `backend.tfbackend` / `allocated-subnets.yaml` | **Working** (§8 milestone 13 — supersedes milestone 12's flat layout inside `infrastructure/aws/workspace/`; grouped under `<cloud>/` since §8 milestone 35) | Per workspace, grouped in their own directory (not flat alongside the shared Terraform root), all committed: `deployment.yaml` — as of §8 milestone 29, a **normal workspace needs no content here at all** beyond `api_version: v1`; every concrete value (Databricks account, VPC/route tables, subnets, security group, KMS keys, metastore) now has a request-level field and/or an `platform/inventory/aws.yaml` default, with `deployment.yaml` surviving only as the rarely-needed *override* tier (deployment override always wins over the request, which wins over the inventory default — see §5.3's note and §8 milestone 29's five items); `terraform.tfvars.json` (generated by `generate_tfvars.py`, do not hand-edit); `backend.tfbackend` (generated by `generate_backend_config.py`, do not hand-edit — just this workspace's state `key`; paired at `init` time with the shared `infrastructure/aws/workspace/backend.tfbackend` above); and (§8 milestone 28, only for workspaces using subnet auto-allocation) `allocated-subnets.yaml` — generated once on first run by `generate_tfvars.py`'s `ensure_subnet_allocation()` and never recomputed afterward (do not hand-edit; delete it to force reallocation before first apply). `document-ai-dev`, `isolated-proof`, and `client-vpc-proof` all have explicit subnet lists in `deployment.yaml` (no `allocated-subnets.yaml` needed for any of them) and, as of milestone 29, no `databricks:` block at all — `document-ai-dev` relies purely on the inventory default, `isolated-proof`/`client-vpc-proof` get their (different) Databricks account from their own `workspace-requests/*.yaml`'s `cloud.databricks_account_id`. **All three workspaces were destroyed on 2026-10-13** (user's call, clean `terraform destroy` for all three) — these files are kept so any of them can be redeployed later via the same shared root. |
 | `infrastructure/aws/workspace/local.auto.tfvars` (gitignored) / `local.auto.tfvars.example` (committed) | Working | Holds `databricks_profile`. With one shared root again, either this file or the `TF_VAR_databricks_profile` env var works equally well — both apply globally now, no per-directory copying concern anymore. |
 | `infrastructure/nonprod/poc/` | Frozen POC | The original one-shot POC that validated the approach end-to-end. Not touched going forward; kept for reference. |
-| `infrastructure/platform/` | Empty placeholder, deliberately not pursued yet | Would be shared/platform-owned Terraform state used by multiple workspaces. Considered for a shared KMS key during an earlier architecture review and explicitly rejected — every workspace creates and owns its own KMS key(s) in its own state (own S3 key, now). Revisit only if a real need for cross-workspace sharing shows up. |
+| `infrastructure/platform/` | Empty placeholder, still unused | Would be shared/platform-owned Terraform state used by multiple workspaces. Considered for a shared KMS key during an earlier architecture review and explicitly rejected — every workspace creates and owns its own KMS key(s) in its own state (own S3 key, now). The one real account-wide/shared-state need that came up (§10 backlog item #1 - account-level `disable_legacy_features`/network policy/audit log delivery) landed as a new sibling root, `infrastructure/aws/account/` (§8 milestone 39), not inside this literal directory - it needed its own backend/provider setup anyway, and this directory was never wired into any pipeline. Revisit only if a real need for cross-workspace sharing shows up that doesn't fit its own dedicated root. |
 | `infrastructure/application/` | Empty placeholder | Reserved for application-level resources layered on top of a workspace. Not started. |
 | `modules/aws-poc/networking`, `modules/aws-poc/kms`, `modules/aws-poc/security`, `modules/aws-poc/storage`, `modules/aws-poc/endpoints` | POC-era, superseded for the factory | Built for the single-shot POC (`infrastructure/nonprod/poc`). Hardcode `var.project_name`, use a placeholder `ec2.amazonaws.com` trust policy in `security` (explicitly flagged in that file's own comment as provisional), single KMS key, 2-bucket storage. `modules/aws-poc/kms` is superseded by `modules/aws/workspace-kms`, and `modules/aws-poc/endpoints` by `modules/aws/workspace-endpoints`, for the factory path — both POC modules stay only for `infrastructure/nonprod/poc`, don't extend them further. `networking`/`security`/`storage` still need generalized replacements if/when needed. |
-| `modules/aws/workspace-deployment` | **Working** | The composed, real deployment logic: network, endpoints, PrivateLink, IAM role, KMS, credentials/storage/network/workspace registration, government-readiness hardening (§8 milestone 38 — `module.workspace_hardening`, after `databricks_mws_workspaces.this`). Called by the one shared root (above) for every workspace — no longer "called by every new per-workspace directory" now that milestone 10's approach was superseded by milestone 12. Deliberately excludes the old scratch `terraform_data.workspace_configuration` resource (§5.5) — no reason to carry known debt into this module. `s3.tf`'s root-bucket policy now also merges in an explicit `DenyInsecureTransport` statement (§8 milestone 38) on top of the Databricks-generated policy, via `aws_iam_policy_document`'s `source_policy_documents`. |
+| `modules/aws/workspace-deployment` | **Working** | The composed, real deployment logic: network, endpoints, PrivateLink, IAM role, KMS, credentials/storage/network/workspace registration, government-readiness hardening (§8 milestone 38 — `module.workspace_hardening`, after `databricks_mws_workspaces.this`), optional account-level network policy attachment (§8 milestone 39 — `databricks_workspace_network_option.this`, `count = 1` only when `var.network_policy_id` is non-null; real finding, not an argument on `databricks_mws_workspaces` itself). Called by the one shared root (above) for every workspace — no longer "called by every new per-workspace directory" now that milestone 10's approach was superseded by milestone 12. Deliberately excludes the old scratch `terraform_data.workspace_configuration` resource (§5.5) — no reason to carry known debt into this module. `s3.tf`'s root-bucket policy now also merges in an explicit `DenyInsecureTransport` statement (§8 milestone 38) on top of the Databricks-generated policy, via `aws_iam_policy_document`'s `source_policy_documents`. |
 | `modules/azure/workspace-network`, `modules/azure/workspace-deployment` | **New, §8 milestone 35; hardened §8 milestone 38** | Azure's analogs of `modules/aws/workspace-network`/`modules/aws/workspace-deployment` — nested under a top-level `modules/azure/` directory (mirroring `databricks/terraform-databricks-sra`'s own `aws/`/`azure/` split; initially prefixed `azure-` instead, moved into this nested layout before the first commit once the user asked for cloud-segregated directories across the whole repo). `workspace-network`: create-only VNet-injection path validated by a real-subscription spike — VNet + two `Microsoft.Databricks/workspaces`-delegated subnets + a baseline NSG (default rules only — confirmed sufficient for real cluster traffic by the milestone 37 cluster/NSG spike, no longer an open gap). No existing-VNet-reuse variables yet, same "build the create-path first" sequencing AWS's own `custom` strategy went through. `workspace-deployment`: creates its own dedicated resource group + calls `workspace-network` + `azurerm_databricks_workspace` (`sku = "premium"`, `custom_parameters` wired to the network module's outputs, plus — §8 milestone 38 — `default_storage_firewall_enabled = true` with a dedicated `azurerm_databricks_access_connector.dbfs`, and a native `enhanced_security_compliance` block gated on `compliance_standards` being non-empty). Deliberately does **not** compose Unity Catalog the way `modules/aws/workspace-deployment` does — see `infrastructure/azure/workspace/*.tf`'s row above for why. |
 | `modules/azure/unity-catalog-data`, `modules/azure/unity-catalog-workspace` | **New, §8 milestone 35, real-apply-verified by the spike (not this exact code, but the identical resource shapes)** | Azure's Unity Catalog modules — `unity-catalog-data` is a direct same-shape port of `modules/aws/unity-catalog-data` (ADLS Gen2 storage account + filesystem instead of an S3 bucket; `azurerm_databricks_access_connector` + an RBAC role assignment instead of an IAM role + policy; a `time_sleep` for RBAC propagation, same class of fix as AWS's IAM-propagation `time_sleep`; `databricks_storage_credential` with an `azure_managed_identity` block instead of `aws_iam_role`). `unity-catalog-workspace` is a deliberate **fork**, not a generalization, of `modules/aws/unity-catalog-workspace` — same `databricks_catalog`/`databricks_grants`/`databricks_default_namespace_setting` shape, but no `databricks_metastore_assignment` resource at all (Azure auto-assigns one) and no `provider_config { workspace_id }` blocks anywhere (both modules receive a workspace-URL-scoped `databricks` provider as their plain default, which already only ever talks to one workspace). Real, spike-validated simplification vs. AWS: **no `databricks_workspace_binding` resources at all** — AWS needs those only because its storage credential/external location are created through the account-level provider, which doesn't auto-bind isolated resources to the creating workspace; a workspace-scoped provider never has that mismatch. |
 | `modules/aws/workspace-network`, `modules/aws/workspace-endpoints`, `modules/aws/workspace-privatelink`, `modules/aws/workspace-iam-role`, `modules/aws/workspace-kms` | Working | Factory-style modules composed by `modules/aws/workspace-deployment`. `workspace-network` supports independent existing-or-create per sub-resource (vpc/routing/security-group, and, as of 2026-10-19, subnets too via `existing_subnet_ids` — §8 milestone 33) — both `custom` and `isolated` strategies are now real, not just modeled in config (§8) — and, as of 2026-10-15 (§8 milestone 27), an optional single-NAT-Gateway fallback (IGW, public subnet, EIP, NAT Gateway, default routes on the private route tables) gated on `nat_enabled && create_vpc`, for workspaces without Databricks PrivateLink available. `workspace-endpoints` provides the S3 gateway + STS (+ KMS, conditionally) interface endpoints needed whenever there's no NAT; its interface-endpoint security group ingress is scoped to the workspace compute security group (not a CIDR) — matches the SRA reference's approach (§7/§8); built regardless of whether NAT is also enabled (reduces NAT data-transfer cost either way). `workspace-privatelink` registers the two Databricks PrivateLink endpoints (REST API + SCC relay) and private access settings so classic compute can reach the control plane with no NAT — see §7/§8; requires Enterprise tier, see `network.connectivity` (§8 milestone 27) for the now-automatic NAT fallback when it isn't available. `workspace-iam-role` uses proper Databricks cross-account trust + restricted policy. `workspace-kms` provisions the customer-managed workspace-storage + managed-services keys, gated on `encryption.workspace == "customer_managed"`, with optional bring-your-own-existing-key inputs per key (§8). |
@@ -3122,6 +3124,174 @@ Priority order agreed on:
       35, 37). Both spikes' request/normalized/deployment files were
       deleted rather than committed, same "leaves no trace" convention
       as every other throwaway spike.
+39. **Account-level shared-state root (AWS) — closes §10 backlog item #1
+    for AWS** (2026-10-20). §10's highest-priority backlog item,
+    tackled first: `disable_legacy_features` at the Databricks
+    *account* level, an account network policy
+    (`databricks_account_network_policy`), and audit log delivery
+    (`databricks_mws_log_delivery`) — all account-wide settings that
+    affect every current and future workspace on a Databricks account,
+    not one workspace's own deployment. This is the first thing built
+    into `infrastructure/platform/`'s reserved-but-empty slot (§3) —
+    except it lands as a new sibling root, `infrastructure/aws/account/`,
+    not inside that literal directory, since `infrastructure/platform/`
+    was never actually wired into any pipeline and this needed its own
+    backend/provider setup anyway.
+    - **Grounded directly in SRA's own source and the Databricks
+      provider's own docs, fetched live this session, not memorized**:
+      `aws/tf/modules/databricks_account/{disable_legacy_features,
+      network_policy,audit_log_delivery}`, plus the provider's raw
+      `docs/resources/{account_network_policy,
+      workspace_network_option}.md`.
+    - **A real design-changing finding caught only by checking the
+      provider's own docs, not by trusting a quick grep of SRA's root
+      main.tf**: SRA's root passes `network_policy_id` into what looks
+      like the workspace-creation module call, which read as "set this
+      directly on `databricks_mws_workspaces`." That's wrong —
+      `databricks_mws_workspaces` has no such argument. A workspace's
+      network policy is actually governed by a completely separate
+      resource, `databricks_workspace_network_option`, whose own docs
+      say it "cannot be created or deleted," only updated — every
+      workspace always has exactly one policy (`default-policy` unless
+      changed) and this resource just repoints that association.
+      Caught *before* writing the wrong code, by checking the actual
+      provider docs instead of trusting the shallow grep result; this
+      is exactly the kind of gap `terraform validate` would also have
+      caught immediately (a nonexistent argument), but checking first
+      meant zero wasted implementation.
+    - **A second real finding, also from the provider's own current
+      docs (not SRA's older source comments)**: the network policy's
+      `egress.network_access.restriction_mode` governs how **serverless**
+      workloads reach the internet — it has no effect on classic,
+      VPC-injected compute, which is the only compute shape this
+      factory builds today (CLAUDE.md §1/§6). So `restrict_egress`
+      carries no lockout risk for any workspace this factory has ever
+      built; the real lockout risk in this resource is entirely on the
+      *ingress* side (`context_based_ingress_ip_acl`, which really can
+      lock an operator out of the workspace/account console if a wrong
+      range is set — SRA's own warning comment, carried into this
+      project's variable description).
+    - **New Terraform root**: `infrastructure/aws/account/` — a third
+      kind of state boundary (alongside per-AWS-workspace and
+      per-Azure-workspace), one per Databricks account, applied
+      independently of any workspace's lifecycle. Same
+      `databricks.mws`-aliased provider shape as
+      `infrastructure/aws/workspace/`; same partial `backend "s3" {}` +
+      `-backend-config` mechanism, same `beng-tfstatefiles` bucket, new
+      state-key convention `account/<databricks_account_id>/terraform.tfstate`.
+      Unlike the per-workspace backend-config (generated by a script,
+      since there are many workspaces), this root's
+      `backend.tfbackend` is a single, hand-written, committed file —
+      there's no per-workspace multiplicity problem to justify a
+      generator. Inputs are a plain, hand-written, committed
+      `infrastructure/deployments/aws/account/<databricks_account_id>/terraform.tfvars.json`
+      — deliberately **not** resolver/schema-pipeline-driven, since this
+      isn't workspace-request-driven; it's an infrequent, operator-run,
+      per-account action. `databricks_profile` stays out of the
+      committed tfvars, same `local.auto.tfvars`
+      (gitignored)/`local.auto.tfvars.example` (committed) convention as
+      the workspace root, for the same reason (a per-operator/machine
+      value, not account config).
+    - **Three new modules, one per concern** (matches both this
+      project's own convention and SRA's own module split):
+      `modules/aws/account-legacy-features` (one resource,
+      `databricks_disable_legacy_features_setting` — no variables
+      beyond the provider); `modules/aws/account-network-policy`
+      (`databricks_account_network_policy`, full SRA shape — egress
+      `restriction_mode`/`allowed_internet_destinations`; ingress
+      `context_based_ingress_ip_acl`/`cross_workspace_access`/
+      `private_access`); `modules/aws/account-audit-log-delivery` (the
+      full SRA chain — S3 bucket, IAM role/policy via
+      `databricks_aws_assume_role_policy`
+      (`for_log_delivery = true`)/`databricks_aws_bucket_policy`, a
+      `time_sleep` for IAM propagation (same class of fix used
+      elsewhere in this project), `databricks_mws_credentials`,
+      `databricks_mws_storage_configurations`,
+      `databricks_mws_log_delivery`). All three composed into
+      `infrastructure/aws/account/main.tf` behind **independent
+      boolean toggles, all defaulting to `false`** — deliberately
+      asymmetric with milestone 38's workspace-level hardening (which
+      left its equivalent legacy-feature disables unconditional):
+      these are account-*wide*, and milestone 38's own real finding
+      (the workspace-scoped `disable_legacy_*` settings are
+      permanently one-way-locked once enabled) makes it very likely
+      the account-level version is too — so this root is a no-op until
+      an operator deliberately opts in, not secure-by-default the way
+      per-workspace hardening is.
+    - **The one piece of cross-root plumbing** (`network_policy_id` —
+      the only one of the three features with any coupling to a
+      workspace's own resources): resolved the same proven way as
+      `metastore_id`/`vpc_id`/`databricks_account_id` — at
+      config-generation time in Python, never via Terraform remote
+      state (this project has consistently kept Terraform roots
+      decoupled from each other). New optional
+      `platform/inventory/aws.yaml` field,
+      `databricks.accounts.<id>.network_policy_id` (sibling to
+      `metastore_id`/`privatelink_available`, but keyed only by
+      Databricks account id, not region — a network policy is
+      account-wide, not region-scoped). New
+      `resolver/inventory.py::resolve_network_policy_id()` — same
+      shape as `resolve_metastore_id()` but **never raises**: an unset
+      network policy is a valid, common state (every workspace today),
+      unlike an unset metastore when Unity Catalog is required.
+      `resolver/generate_tfvars.py` calls it unconditionally (same
+      treatment as `compliance_standards`, independent of Unity
+      Catalog) and forwards a non-null result as a new top-level
+      `network_policy_id` tfvars key.
+      `modules/aws/workspace-deployment` gained the matching
+      `network_policy_id` variable (nullable, default `null`) and a new
+      `databricks_workspace_network_option.this` resource (`count = 1`
+      only when non-null, `provider = databricks.mws`, `workspace_id =
+      databricks_mws_workspaces.this.workspace_id`) — threaded through
+      `infrastructure/aws/workspace` exactly like every other optional
+      override.
+    - **Explicitly deferred, new backlog items** (not built this pass):
+      Azure's account-level equivalent (needs its own research pass —
+      an account-level Databricks provider for Azure has never existed
+      in this project, every Azure resource today uses a
+      workspace-scoped provider; whether/how a network-option-style
+      resource attaches to `azurerm_databricks_workspace` is unknown;
+      Azure's native audit-log mechanism is almost certainly Diagnostic
+      Settings, a different shape entirely from
+      `databricks_mws_log_delivery`); any real `terraform apply` of
+      these three features against a live Databricks account — this
+      pass is build + `plan`-verify only, same precedent as Unity
+      Catalog (milestone 19 → milestone 23), given
+      `disable_legacy_features`'s likely one-way lock.
+    - Verified: `terraform fmt -check -recursive` clean repo-wide.
+      `terraform validate` clean for the new root (standalone
+      per-module validate of all three new modules shows the
+      already-known, non-issue `configuration_aliases` false-alarm
+      when validated in isolation — the full-root validate is the real
+      check) and for `infrastructure/aws/workspace` after threading
+      `network_policy_id` through. `terraform plan` against the new
+      account root with the committed all-`false` tfvars: **0
+      resources, "No changes"** — confirms the root is a true no-op by
+      default. A throwaway plan (not committed) with all three toggles
+      flipped `true` **against the real Databricks account-console API**
+      (the `TSA` profile/account, not just offline validate): **12 to
+      add, 0 errors** — exercised `databricks_account_network_policy`'s
+      real schema, the `databricks_aws_bucket_policy`/
+      `databricks_aws_assume_role_policy` data sources, and the full
+      audit-log-delivery chain against a live API, not just local
+      config. Regenerated `terraform.tfvars.json` for all five real AWS
+      workspace deployment directories — **byte-identical**, confirming
+      zero effect on anything already real. Spot-checked
+      `document-ai-dev`'s `terraform plan` against its destroyed state
+      (profile mismatch aside — no valid CLI profile exists for its own
+      Databricks account at the time of writing, so the `TSA` profile
+      was used as a stand-in just to exercise the plan mechanics): **32
+      to add, 0 errors**, matching its established post-milestone-38
+      baseline exactly (30 + the 2 hardening resources) — confirms
+      `databricks_workspace_network_option`'s `count = 0` default adds
+      nothing when `network_policy_id` is unset, same as every other
+      optional override in this project.
+    - **Not yet done, explicit next steps when revisited**: apply
+      `infrastructure/aws/account/` for real against a chosen Databricks
+      account (a separate, explicit go/no-go per the Design section
+      above); once applied, paste the resulting `network_policy_id`
+      into `platform/inventory/aws.yaml` for any account that should
+      default new workspaces onto it.
 
 ## 9. Conventions observed (keep consistent)
 
@@ -3240,20 +3410,26 @@ not a hard mandate — re-prioritize anytime, but update this list when
 you do, and cross an item off (move it to a §8 milestone) rather than
 deleting it silently.
 
-1. **Account-level/shared-state SRA features** (government-readiness
-   Phase 2, deferred from milestone 38). Three things SRA does at the
-   Databricks *account* level, not per-workspace: account-level
-   `disable_legacy_features`, an account network egress policy
-   (`databricks_account_network_policy`), and audit log delivery
-   (`databricks_mws_log_delivery`). All three are shared state — one
-   setting affects every current and future workspace on that
-   Databricks account — which is exactly what `infrastructure/platform/`
-   was reserved for but never built (§3's row for that directory).
-   **This needs a real shared-state design first** (a new Terraform
-   root/backend for account-level resources, decoupled from any one
-   workspace's state) before any of the three can be implemented
-   safely. Do this design conversation before writing any `.tf` for
-   this item.
+1. **Account-level/shared-state SRA features — AWS done, see §8
+   milestone 39.** `infrastructure/aws/account/` now builds all three
+   (`disable_legacy_features` at the account level, an account network
+   policy via `databricks_account_network_policy`, and audit log
+   delivery via `databricks_mws_log_delivery`), all independently
+   toggled and defaulting off, plan-verified against the real
+   Databricks account-console API. **Still open**: Azure's equivalent
+   (see new item #1a below) and a real `terraform apply` of any of the
+   three against a live Databricks account (a separate, explicit
+   go/no-go per milestone 39's own writeup).
+1a. **Azure account-level equivalent** (new, split off from item #1
+   once the AWS half was built — milestone 39). Needs its own research
+   pass before any code: an account-level Databricks provider for
+   Azure has never existed in this project (every Azure resource today
+   uses a workspace-scoped provider); whether/how a
+   `databricks_workspace_network_option`-style resource attaches to
+   `azurerm_databricks_workspace` is unknown; Azure's native audit-log
+   mechanism is almost certainly Diagnostic Settings / Log Analytics, a
+   different shape entirely from `databricks_mws_log_delivery` (which
+   is AWS S3-storage-specific).
 2. **AWS GovCloud / Azure Government sovereign-boundary plumbing**
    (deferred from milestone 38, the most directly relevant item to
    this project's original "government agency" framing, but

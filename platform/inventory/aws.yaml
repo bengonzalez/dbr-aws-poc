@@ -43,6 +43,17 @@ cidr_pools:
 # (CLAUDE.md §5.11). Drives network.connectivity's "auto" default
 # (resolver/inventory.py's resolve_connectivity(), §8 milestone 27) -
 # NAT whenever PrivateLink isn't available, not a silent connectivity gap.
+#
+# network_policy_id (sibling to privatelink_available, also per account
+# not per region - a network policy is account-wide): the id of the
+# account-level network policy created by infrastructure/aws/account/
+# (CLAUDE.md §10 backlog item #1 / §8 milestone 39), if that root has
+# been applied with enable_network_policy = true for this account. Paste
+# in the value from that root's `terraform output network_policy_id`.
+# Omitted/absent (today, for both known accounts - that root hasn't been
+# applied yet) means every workspace stays on the account's own
+# un-deletable default-policy, resolver/inventory.py's
+# resolve_network_policy_id() never requires this field.
 databricks:
   accounts:
     "331f8702-2e00-42e9-82e2-2935e7e1d4f9":

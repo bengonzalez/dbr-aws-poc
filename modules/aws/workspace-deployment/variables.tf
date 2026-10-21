@@ -188,6 +188,12 @@ variable "compliance_standards" {
   default     = []
 }
 
+variable "network_policy_id" {
+  description = "ID of an account-level Databricks network policy (see infrastructure/aws/account/, CLAUDE.md §10 backlog item #1 / §8 milestone 39) to attach to this workspace. Null (default) leaves the workspace on the account's own un-deletable default-policy, unchanged from today's behavior."
+  type        = string
+  default     = null
+}
+
 
 variable "ownership" {
   description = "Workspace ownership information."

@@ -71,6 +71,41 @@ def resolve_metastore_id(
     return existing_metastore_id
 
 
+def resolve_network_policy_id(
+    databricks_account_id: str,
+    deployment: dict,
+    inventory: dict,
+) -> str | None:
+    """
+    Resolve which account-level Databricks network policy (if any) a
+    workspace should attach to - a sibling lookup to
+    resolve_metastore_id(), but keyed only by Databricks account id (a
+    network policy is an account-wide object, not region-scoped the way
+    a metastore is), and never required: an unset network policy just
+    means the workspace stays on the account's own un-deletable
+    default-policy, the behavior every workspace already has today.
+
+    Precedence: deployment.yaml's 'network_policy_id' override > the
+    inventory default from platform/inventory/aws.yaml's
+    'databricks.accounts.<id>.network_policy_id' (populated by hand from
+    infrastructure/aws/account/'s own `terraform output
+    network_policy_id`, once that root has been applied - see CLAUDE.md
+    §10 backlog item #1 / §8 milestone 39). Returns None, never raises,
+    when nothing is set anywhere.
+    """
+
+    inventory_network_policy_id = (
+        inventory.get("databricks", {})
+        .get("accounts", {})
+        .get(databricks_account_id, {})
+        .get("network_policy_id")
+    )
+
+    override_network_policy_id = deployment.get("network_policy_id")
+
+    return override_network_policy_id or inventory_network_policy_id or None
+
+
 def resolve_databricks_account_id(
     aws_account_id: str,
     inventory: dict,
