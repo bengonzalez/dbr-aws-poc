@@ -42,11 +42,17 @@ azure:
       # network_policy_id is - this project's Azure pipeline has never
       # tracked a distinct Databricks account id anywhere else (see the
       # header comment above), so introducing one just for these two
-      # fields would be its own, separate piece of scope. Omitted
-      # today (that root hasn't been applied yet) - resolver/
-      # generate_tfvars_azure.py never requires either.
+      # fields would be its own, separate piece of scope. Neither is
+      # ever required by resolver/generate_tfvars_azure.py.
+      #
+      # log_analytics_workspace_id: set 2026-10-21 (§8 milestone 44) from
+      # infrastructure/azure/account/'s output, for Databricks account
+      # 8fba155f-8c42-489f-b379-f43d6f779789 - every new Azure workspace
+      # in this subscription now gets a diagnostic setting pointed here.
+      # network_policy_id: set only once enable_network_policy is applied
+      # in that root (see milestone 44).
+      log_analytics_workspace_id: "/subscriptions/2539d6cd-e5b0-409e-b246-ed2b4814ef5f/resourceGroups/rg-databricks-platform-audit-log-delivery/providers/Microsoft.OperationalInsights/workspaces/law-databricks-platform-audit-logs"
       # network_policy_id: "<paste output here>"
-      # log_analytics_workspace_id: "<paste output here>"
 
       regions:
         southcentralus:

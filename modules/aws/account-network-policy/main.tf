@@ -44,7 +44,15 @@ resource "databricks_account_network_policy" "this" {
     }
   }
 
-  ingress = {
+  # Only sent when an ingress IP allow-list is requested. Any ingress block
+  # - even the permissive one below - needs context-based ingress, a gated
+  # account feature: an account without it rejects the whole policy with
+  # "Feature `CBI Policy Private Access` has not been enabled for account"
+  # (found applying this for real, CLAUDE.md §8 milestone 44). Omitting it
+  # matches the account's own default-policy, which has no ingress block.
+  # Setting context_based_ingress_ip_acl still needs Databricks to enable
+  # that feature on the account first.
+  ingress = length(var.context_based_ingress_ip_acl) == 0 ? null : {
     # No endpoints are registered against this policy by default, so this
     # has no practical effect until PrivateLink/private-endpoint
     # registration is in play - safe to leave permissive.

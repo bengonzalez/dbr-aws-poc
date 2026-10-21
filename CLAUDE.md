@@ -147,7 +147,7 @@ requirements, security controls, Terraform behavior.
 | `modules/aws/account-legacy-features/`, `modules/aws/account-network-policy/`, `modules/aws/account-audit-log-delivery/` | **New, §8 milestone 39, plan-verified against the real Databricks account-console API** | Account-scoped Databricks-provider modules, one per concern (mirrors SRA's own `databricks_account/*` split). `account-legacy-features`: one resource, `databricks_disable_legacy_features_setting` — distinct from `modules/aws/workspace-hardening`'s workspace-scoped `disable_legacy_access`/`disable_legacy_dbfs` (§8 milestone 38); likely a one-way lock once enabled, same as those. `account-network-policy`: `databricks_account_network_policy`, full SRA shape (egress restriction + ingress IP ACL/cross-workspace/private-access) — real finding (not SRA's older comments, the provider's own current docs): the egress restriction governs *serverless* workloads only, no effect on this factory's classic compute, so the real lockout risk is entirely on the ingress IP-ACL side. `account-audit-log-delivery`: the full SRA chain (S3 bucket, IAM role/policy, `databricks_mws_credentials`/`_storage_configurations`/`_log_delivery`). None of the three are wired into any workspace automatically — `network_policy_id` is the one value a workspace can opt into, via `platform/inventory/aws.yaml` + `resolver/inventory.py::resolve_network_policy_id()`, same auto-lookup pattern as `metastore_id`. |
 | `infrastructure/azure/workspace/*.tf` | **New, §8 milestone 35** | Azure's shared root, parallel sibling to `infrastructure/aws/workspace/` — same one-shared-root-per-cloud convention, not merged into the AWS root (the `azurerm`/`databricks` provider blocks are irreconcilable with AWS's `aws` provider block). `providers.tf` defines the `azurerm` provider (no explicit subscription id — derived from whichever `az` CLI session is active, same posture as the AWS root never passing an explicit account id to its own `aws` provider) plus an *aliased* `databricks` provider (`alias = "workspace"`, `host = "https://${module.deployment.workspace_url}"`, `auth_type = "azure-cli"`) — this provider has to live in the root rather than inside `module.deployment` itself, since Terraform does not allow a non-root module to define a provider block that references a resource it creates; that's also why this root composes Unity Catalog directly (`module.unity_catalog_data`/`module.unity_catalog_workspace`) rather than nesting that composition inside `module.deployment` the way the AWS root does. `backend "azurerm" {}` is partial, configured at `init` time via `-backend-config`, mirroring the AWS root's partial S3 backend exactly. `locals.tf` derives a valid (<=24-char, lowercase-alphanumeric) ADLS Gen2 storage account name from the workspace name plus a slice of `data.azurerm_client_config.current.subscription_id` — not guaranteed globally unique across tenants, a known, accepted limitation for this pass. As of §8 milestone 40, this root also defines a *second* aliased `databricks` provider (`alias = "mws"`, account-console host/`account_id`) purely to support an optional `databricks_workspace_network_option` resource — that resource's own docs require an account-level provider, unlike every other Databricks resource here, which uses the workspace-scoped one. |
 | `infrastructure/azure/workspace/backend.tfbackend` | **Working, §8 milestones 35/36** | Azure's analog of the AWS root's shared backend file — `resource_group_name`/`storage_account_name`/`container_name` instead of `bucket`/`region`/`use_lockfile`. The Azure Storage Account (`sttfstate2539d6cd`, resource group `rg-databricks-tfstate`) was created for real via `az` CLI in milestone 36 — same "pre-existing, manually-managed" posture as AWS's `beng-tfstatefiles` bucket. |
-| `infrastructure/azure/account/*.tf` | **New, §8 milestone 40, plan-verified against a placeholder account id only — see §10 item #1a** | Azure's analog of `infrastructure/aws/account/` (§8 milestone 39) — a second Azure Terraform root, one per Databricks account, sibling to `infrastructure/azure/workspace/`. Composes `modules/azure/account-legacy-features`/`modules/azure/account-network-policy` behind independent boolean toggles (all defaulting `false`, same reasoning as the AWS root), plus the one genuinely account-wide piece of Azure audit logging: a shared `azurerm_resource_group`/`azurerm_log_analytics_workspace` destination (gated on `enable_audit_log_delivery`) that per-workspace diagnostic settings point at — see `modules/azure/workspace-deployment`'s row below for why that split exists. No real `databricks_account_id` is known yet (see §10 item #1a), so there's no real `infrastructure/deployments/azure/account/<id>/` directory — only a `TEMPLATE/` one. |
+| `infrastructure/azure/account/*.tf` | **New, §8 milestone 40; real account id + audit-log destination applied §8 milestone 44 (all three toggles applied; network policy not yet attached to workspaces) — see §10 item #1a** | Azure's analog of `infrastructure/aws/account/` (§8 milestone 39) — a second Azure Terraform root, one per Databricks account, sibling to `infrastructure/azure/workspace/`. Composes `modules/azure/account-legacy-features`/`modules/azure/account-network-policy` behind independent boolean toggles (all defaulting `false`, same reasoning as the AWS root), plus the one genuinely account-wide piece of Azure audit logging: a shared `azurerm_resource_group`/`azurerm_log_analytics_workspace` destination (gated on `enable_audit_log_delivery`) that per-workspace diagnostic settings point at — see `modules/azure/workspace-deployment`'s row below for why that split exists. No real `databricks_account_id` is known yet (see §10 item #1a), so there's no real `infrastructure/deployments/azure/account/<id>/` directory — only a `TEMPLATE/` one. |
 | `modules/azure/account-legacy-features/`, `modules/azure/account-network-policy/` | **New, §8 milestone 40, schema-validated only (no real account id to plan against yet)** | Direct ports of `modules/aws/account-legacy-features`/`modules/aws/account-network-policy` — both are plain Databricks-provider resources with no cloud-specific schema at all, confirmed from the provider's own docs, so nothing changed apart from which root's provider they receive. Deliberately forked, not shared with the AWS modules — matches `modules/azure/unity-catalog-workspace`'s own "fork, not generalize" precedent below. |
 | `infrastructure/deployments/aws/<env>/<name>/deployment.yaml` / `terraform.tfvars.json` / `backend.tfbackend` / `allocated-subnets.yaml` | **Working** (§8 milestone 13 — supersedes milestone 12's flat layout inside `infrastructure/aws/workspace/`; grouped under `<cloud>/` since §8 milestone 35) | Per workspace, grouped in their own directory (not flat alongside the shared Terraform root), all committed: `deployment.yaml` — as of §8 milestone 29, a **normal workspace needs no content here at all** beyond `api_version: v1`; every concrete value (Databricks account, VPC/route tables, subnets, security group, KMS keys, metastore) now has a request-level field and/or an `platform/inventory/aws.yaml` default, with `deployment.yaml` surviving only as the rarely-needed *override* tier (deployment override always wins over the request, which wins over the inventory default — see §5.3's note and §8 milestone 29's five items); `terraform.tfvars.json` (generated by `generate_tfvars.py`, do not hand-edit); `backend.tfbackend` (generated by `generate_backend_config.py`, do not hand-edit — just this workspace's state `key`; paired at `init` time with the shared `infrastructure/aws/workspace/backend.tfbackend` above); and (§8 milestone 28, only for workspaces using subnet auto-allocation) `allocated-subnets.yaml` — generated once on first run by `generate_tfvars.py`'s `ensure_subnet_allocation()` and never recomputed afterward (do not hand-edit; delete it to force reallocation before first apply). `document-ai-dev`, `isolated-proof`, and `client-vpc-proof` all have explicit subnet lists in `deployment.yaml` (no `allocated-subnets.yaml` needed for any of them) and, as of milestone 29, no `databricks:` block at all — `document-ai-dev` relies purely on the inventory default, `isolated-proof`/`client-vpc-proof` get their (different) Databricks account from their own `workspace-requests/*.yaml`'s `cloud.databricks_account_id`. **All three workspaces were destroyed on 2026-10-13** (user's call, clean `terraform destroy` for all three) — these files are kept so any of them can be redeployed later via the same shared root. |
 | `infrastructure/aws/workspace/local.auto.tfvars` (gitignored) / `local.auto.tfvars.example` (committed) | Working | Holds `databricks_profile`. With one shared root again, either this file or the `TF_VAR_databricks_profile` env var works equally well — both apply globally now, no per-directory copying concern anymore. |
@@ -3723,6 +3723,80 @@ Priority order agreed on:
       milestone 39. AWS audit delivery is account-level, so a
       per-workspace check there would need a different design.
 
+44. **Azure account root stood up against the real account — §10 item
+    #1a** (2026-10-21). Three real findings, in the order hit:
+    - **The tenant is the user's own**: "BenAvanade",
+      `bengonzalezavanade.onmicrosoft.com`, not Avanade's corporate
+      tenant. Azure has one Databricks account per tenant, so
+      account-wide settings here affect no one else. The deploying
+      identity is a **guest** there
+      (`...#EXT#@bengonzalezavanade.onmicrosoft.com`, home tenant Avanade
+      `cf36141c-...`) and holds **Global Administrator**.
+    - **Wrong account id at first.** Opening `accounts.azuredatabricks.net`
+      directly lands a multi-tenant user in their **home** tenant's
+      account (documented by Microsoft). The first id copied
+      (`67c17d33-...`) was Avanade's corporate Databricks account, and
+      account APIs answered "not account admin". Nothing Databricks-side
+      was ever applied to it. The fix was signing in **as the `#EXT#`
+      guest UPN** in a private window, after redeploying Azure
+      `isolated-proof`, since the account console needs at least one
+      workspace in the tenant. As Global Admin that sign-in was
+      automatically account admin, and gave the real id
+      **`8fba155f-8c42-489f-b379-f43d6f779789`**.
+      `accounts.cloud.databricks.com` is AWS's console and doesn't apply.
+    - **Guest identities need the tenant pinned.** Even on the right
+      account, every `azure-cli`-auth account call failed with *"Expected
+      iss claim to be: https://sts.windows.net/f6b70a04.../, but was:
+      https://sts.windows.net/cf36141c.../"*. The Databricks SDK's tenant
+      auto-discovery requests a token from the guest's **home** tenant,
+      even though `az` itself issues correct BenAvanade tokens. Fixed by
+      setting `azure_tenant_id = data.azurerm_client_config.current.tenant_id`
+      on the account-level `databricks` provider in **both** Azure roots
+      (`infrastructure/azure/account/`, and the workspace root's `mws`
+      alias used for `databricks_workspace_network_option`). For the
+      CLI, set `ARM_TENANT_ID` the same way. The workspace-URL-scoped
+      provider never hit this.
+    - With the tenant pinned, full account-admin access is confirmed:
+      the account lists `dbw-isolated-proof`, and both regional
+      metastores are visible. **Legacy features are already disabled
+      account-wide** (`disable_legacy_features.value: true`), apparently
+      the default for newer accounts, so the one-way-lock worry from
+      milestones 39/40 is moot here. The only network policy is the
+      built-in `default-policy` (`FULL_ACCESS`).
+    - **Applied**: the audit-log destination only
+      (`enable_audit_log_delivery: true`; pure azurerm, 2 resources,
+      `rg-databricks-platform-audit-log-delivery`/
+      `law-databricks-platform-audit-logs`). Its id is in
+      `platform/inventory/azure.yaml`, so every new Azure workspace in
+      the subscription gets an audit diagnostic setting by default.
+      This was first applied under the wrong account id's state key and
+      then **moved** (blob copy to `account/8fba155f-.../terraform.tfstate`,
+      plan **No changes**, old blob deleted); the resources never
+      depended on the account id.
+    - **Then applied both remaining toggles** (user's call):
+      - `enable_legacy_features`: created cleanly. It manages the
+        already-true value, so nothing changed in effect.
+      - `enable_network_policy`: **first attempt failed** with
+        *"Feature `CBI Policy Private Access` has not been enabled for
+        account"*. Context-based ingress is a gated account feature, and
+        the module always sent an `ingress` block, even the permissive
+        default. Fixed in **both** clouds' `account-network-policy`
+        modules (the AWS one is the same code and unapplied): `ingress`
+        is now `null` unless `context_based_ingress_ip_acl` is set,
+        matching the account's own `default-policy`, which has none.
+        Setting an IP allow-list still needs Databricks to enable that
+        feature first. Re-applied: `databricks-platform-np` created; the
+        follow-up plan shows **No changes**.
+      - **Not attached to any workspace**: `network_policy_id` is
+        deliberately **not** in `platform/inventory/azure.yaml` yet.
+        Adding it would move every new Azure workspace (and
+        `isolated-proof` on its next apply) off `default-policy`.
+        Equivalent today, since both are `FULL_ACCESS`, but a separate
+        decision.
+    - Azure `isolated-proof` was redeployed for the console step: 21
+      resources, the first workspace picking up the inventory audit
+      default with no override. Validator: **5 PASS, 2 N/A, 1
+      NOT_IMPLEMENTED** (`logging.centralized` PASS). It's **still live**.
 ## 9. Conventions observed (keep consistent)
 
 - Every top-level cloud-specific location is grouped under a `<cloud>/`
@@ -3853,19 +3927,14 @@ deleting it silently.
    (see new item #1a below) and a real `terraform apply` of any of the
    three against a live Databricks account (a separate, explicit
    go/no-go per milestone 39's own writeup).
-1a. **Azure account-level equivalent — built and validate-clean, see §8
-   milestone 40. Still blocked on one real-world step.** Both modules
-   ported, the `infrastructure/azure/account/` root built, per-workspace
-   audit-log wiring added to `modules/azure/workspace-deployment` (Azure's
-   mechanism turned out to be per-workspace, not account-level — a real
-   architectural difference, not a detail, see milestone 40). **Still
-   open**: no real Azure Databricks account id is known anywhere in this
-   project — discovering it needs you to run `databricks auth login
-   --host https://accounts.azuredatabricks.net` interactively (a browser
-   OAuth flow only you can do). Until then, nothing here has been
-   verified against the real account API the way milestone 39's AWS
-   half was (only schema-level `plan`/`validate` checks against a
-   placeholder id).
+1a. **Azure account-level equivalent — real account stood up, see §8
+   milestones 40/44.** Account `8fba155f-...` (BenAvanade tenant). The
+   shared audit-log destination is applied and is the inventory default.
+   Legacy features (already disabled on the account) and a permissive
+   named network policy (`databricks-platform-np`) are now
+   Terraform-managed. **Still open**: whether to attach workspaces to
+   that policy (`network_policy_id` in the inventory), and the AWS
+   account root's own real apply (item #1).
 2. **AWS GovCloud / Azure Government sovereign-boundary plumbing**
    (deferred from milestone 38, the most directly relevant item to
    this project's original "government agency" framing, but
