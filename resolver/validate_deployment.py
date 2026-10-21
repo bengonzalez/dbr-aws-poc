@@ -3,8 +3,10 @@ Checks a deployed workspace's live AWS/Databricks state against what the
 resolver resolved for it (normalized/<workspace>.yaml) - the consumer of
 policies.yaml's validation_policy (CLAUDE.md Sec5.8 / Sec8).
 
-AWS-only (CLAUDE.md Sec8 milestone 35's Azure support does not extend to
-this script yet).
+Both clouds: AWS checks live here; a workspace whose normalized config is
+under normalized/azure/ is dispatched to validate_deployment_azure.py
+(CLAUDE.md Sec8 milestone 43), which shares this module's statuses,
+report, evidence and blocking logic.
 
 Unlike every other resolver/*.py script, this runs AFTER a real
 `terraform apply`, against live state, not before one against local YAML.
@@ -41,7 +43,7 @@ import argparse
 import json
 import subprocess
 
-from loader import load_yaml
+from loader import load_yaml, resolve_normalized_path
 from inventory import resolve_databricks_account_id, resolve_metastore_id
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -85,7 +87,7 @@ def run_databricks(args: list[str], profile: str) -> tuple[dict | None, str | No
         return None, f"Could not parse databricks CLI output: {result.stdout!r}"
 
 
-def get_terraform_outputs() -> dict:
+def get_terraform_outputs(workspace_root: Path = WORKSPACE_ROOT) -> dict:
     """Read `terraform output -json` from the shared root. Raises
     RuntimeError with an actionable message if the backend isn't
     initialized for any workspace, or isn't the one the caller expects -
@@ -94,7 +96,7 @@ def get_terraform_outputs() -> dict:
     try:
         result = subprocess.run(
             ["terraform", "output", "-json"],
-            cwd=WORKSPACE_ROOT,
+            cwd=workspace_root,
             capture_output=True,
             text=True,
             check=False,
@@ -104,10 +106,10 @@ def get_terraform_outputs() -> dict:
 
     if result.returncode != 0:
         raise RuntimeError(
-            "'terraform output' failed in infrastructure/aws/workspace/ - "
+            f"'terraform output' failed in {workspace_root.relative_to(ROOT)} - "
             "has this workspace's backend been initialized? Run: terraform "
             "init -backend-config=backend.tfbackend "
-            "-backend-config=../../deployments/aws/<env>/<name>/backend.tfbackend "
+            "-backend-config=../../deployments/<cloud>/<env>/<name>/backend.tfbackend "
             f"-reconfigure first. ({result.stderr.strip()})"
         )
 
@@ -442,9 +444,9 @@ def write_evidence(workspace_name: str, results: list[CheckResult]) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Validate a deployed workspace's live AWS/Databricks state "
-            "against what the resolver resolved for it. AWS-only. Run "
-            "this after terraform apply, with infrastructure/aws/workspace/ "
+            "Validate a deployed workspace's live cloud/Databricks state "
+            "against what the resolver resolved for it. Run this after "
+            "terraform apply, with infrastructure/<cloud>/workspace/ "
             "already terraform init'd against this workspace's "
             "backend-config."
         )
@@ -453,10 +455,17 @@ def main() -> int:
     parser.add_argument("--workspace", required=True, help="Workspace name.")
 
     parser.add_argument(
+        "--provider",
+        choices=["aws", "azure"],
+        help="Only needed when the workspace name exists under more than "
+        "one provider's normalized/ directory.",
+    )
+
+    parser.add_argument(
         "--profile",
-        required=True,
-        help="Databricks CLI account-console profile (same one used for "
-        "terraform apply).",
+        help="AWS only (required there): Databricks CLI account-console "
+        "profile (same one used for terraform apply). Azure uses the "
+        "active az login session instead.",
     )
 
     parser.add_argument(
@@ -483,15 +492,12 @@ def main() -> int:
     normalized_path = (
         Path(args.normalized)
         if args.normalized
-        # AWS-only script - "aws" is hardcoded, not auto-detected the way
-        # generate_tfvars.py/generate_backend_config.py do via
-        # loader.resolve_normalized_path(), since there's nothing to
-        # disambiguate here.
-        else ROOT / "normalized" / "aws" / f"{args.workspace}.yaml"
+        else resolve_normalized_path(ROOT, args.workspace, args.provider)
     )
 
     normalized = load_yaml(normalized_path)
     environment = normalized["workspace"]["environment"]
+    provider = normalized["cloud"]["provider"]
 
     deployment_path = (
         Path(args.deployment)
@@ -499,14 +505,24 @@ def main() -> int:
         else ROOT
         / "infrastructure"
         / "deployments"
-        / "aws"
+        / provider
         / environment
         / args.workspace
         / "deployment.yaml"
     )
 
     deployment = load_yaml(deployment_path)
-    inventory = load_yaml(ROOT / "platform" / "inventory" / "aws.yaml")
+    inventory = load_yaml(ROOT / "platform" / "inventory" / f"{provider}.yaml")
+
+    if provider == "azure":
+        # Imported here, not at module top - validate_deployment_azure
+        # imports this module's shared statuses/helpers.
+        from validate_deployment_azure import run_checks_azure
+
+        return _report(args.workspace, normalized, run_checks_azure(normalized, deployment, inventory))
+
+    if not args.profile:
+        raise RuntimeError("--profile (a Databricks account-console CLI profile) is required for AWS workspaces.")
 
     databricks_account_id = resolve_databricks_account_id(
         normalized["cloud"]["account"],
@@ -524,10 +540,17 @@ def main() -> int:
         args.workspace_profile,
     )
 
+    return _report(args.workspace, normalized, results)
+
+
+def _report(workspace_name: str, normalized: dict, results: list[CheckResult]) -> int:
+    """Print, write evidence if required, and return the exit code -
+    shared by both clouds."""
+
     print_report(results)
 
     if normalized["validation"]["evidence"] == "required":
-        evidence_path = write_evidence(args.workspace, results)
+        evidence_path = write_evidence(workspace_name, results)
         print(f"Evidence written to: {evidence_path}")
         print()
 
@@ -549,7 +572,7 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except RuntimeError as error:
+    except (RuntimeError, ValueError, FileNotFoundError) as error:
         print()
         print("validation failed")
         print("------------------")

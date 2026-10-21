@@ -134,6 +134,7 @@ requirements, security controls, Terraform behavior.
 | `workspace-requests/aws/{dev,stage,live}/` | Working | Minimal requester input YAML. One `document-ai` request per env exists as the test case. `dev/azure-isolated-proof.yaml` (§8 milestone 35) is the first Azure request — resolved and plan-verified (17-resource clean create plan), **not yet applied for real** — see milestone 35 for why that's an explicit, separate next step. |
 | `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`, `validate_deployment.py`, `inventory.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `inventory.py` holds shared `platform/inventory/aws.yaml` lookups (`resolve_metastore_id()`, `find_primary_network()`, `resolve_platform_network()`, `subnet_defaults_for()`, `allocate_subnets()`, `resolve_existing_vpc_cidr()` — milestone 28; `resolve_databricks_account_id()` — milestone 29; `resolve_route_table_ids()` — milestone 30, consolidated/renamed from `route_table_ids_known()` in milestone 31; `resolve_network_policy_id()` — milestone 39, never raises, unlike the others, since an unset network policy is a valid default) — centralized here, not in `generate_tfvars.py`, specifically to avoid a circular import with `check_cidr_allocations.py`. `generate_tfvars.py` turns normalized + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/aws/<env>/<name>/` (§8 milestone 13); its metastore and VPC/route-table lookups both come from `inventory.py` (§8 milestones 23, 25); its `ensure_subnet_allocation()` (§8 milestone 28) auto-carves and permanently pins subnet CIDRs into a sibling generated `allocated-subnets.yaml` file whenever a workspace's `deployment.yaml` doesn't hand-type its own `network.subnets.private`; `main()` now resolves `databricks_account_id` once up front (deployment override > request > inventory default, §8 milestone 29) before either of those run; its `resolve_network_ownership()` (§8 milestones 9, 30) now infers `routing_ownership`/`endpoints_ownership` from whether route table ids are actually known for the VPC in play, rather than a blind per-strategy default, and `build_tfvars()` always forwards all three ownership overrides explicitly (not just when set in `deployment.yaml`) so Terraform's own `locals.tf` coalesce can't diverge from the inference. `generate_backend_config.py` turns `normalized/<provider>/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/aws/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/aws/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (§8 milestones 14, 25, 28) scans every committed `deployment.yaml` for CIDR collisions/pool violations, falling back to `inventory.py`'s lookup when a workspace's `deployment.yaml` omits `platform.vpc_id`, and (§8 milestone 28) merging in a workspace's `allocated-subnets.yaml` and the request's own `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` passthroughs when present; exposes `vpc_scope()`/`used_subnets_for_scope()` for `generate_tfvars.py`'s allocator to reuse; called automatically by `generate_tfvars.py` before (and after a first-time allocation) it writes tfvars. `validate_deployment.py` (§8 milestones 23-24, 29) checks a *deployed* workspace's live AWS/Databricks state against what was resolved for it — run manually, post-apply, not wired into anything automatically; its optional `--workspace-profile` additionally verifies live catalog isolation/storage via a workspace-scoped profile (§8 milestone 24); now resolves `databricks_account_id` the same 3-tier way as `generate_tfvars.py` instead of reading `deployment.yaml` directly (§8 milestone 29). As of §8 milestone 35, `generate_tfvars.py`'s `main()` dispatches on `normalized["cloud"]["provider"]` to either its own AWS body (extracted unchanged into `_main_aws()`) or a new sibling module `resolver/generate_tfvars_azure.py`'s `main_azure()`/`build_tfvars_azure()` — deliberately not interleaved as `if`/`else` branches inside this file's existing AWS-shaped functions, same "parallel cloud-specific code" principle as the Terraform module layer below. `resolver/main.py` and `resolver.py` themselves gained one small provider-generic change each (inventory file selection; the one AWS-hardcoded inventory block in `resolve_configuration()`) rather than a parallel file, since both were already cloud-agnostic apart from that one spot. See §5 gaps. |
 | `resolver/generate_tfvars_azure.py` | **New, §8 milestone 35** | Azure's tfvars generation - much smaller than the AWS path's `generate_tfvars.py` given the deliberately bounded scope (no subnet allocation/collision checking, no VPC/routing/SG/endpoints ownership inference, no KMS bring-your-own-key): `derive_subnet_cidrs()` carves the two fixed `/24` subnets Azure's VNet-injection model needs straight out of `network.vpc_cidr` (no AZ-scoped `subnet_defaults` inventory lookup - Azure subnets aren't AZ-scoped the way AWS's are), and `resolve_encryption_azure()` (§8 milestone 42) validates customer-managed encryption: it rejects AWS KMS fields, malformed or unused brought key ids, and customer-managed workspace keys combined with a FedRAMP compliance standard. `custom` strategy (§8 milestone 41) goes through `resolve_existing_vnet()` and `ensure_custom_subnet_allocation()` - the latter allocates two `/24`s inside the client VNet and pins them to `allocated-subnets.yaml`, AWS-milestone-28-style. |
+| `resolver/validate_deployment_azure.py` | **New, §8 milestone 43, live-verified** | Azure checks for the post-apply validation harness, dispatched from `validate_deployment.py` (which now auto-detects the provider via `loader.resolve_normalized_path()`, with an optional `--provider`). It shares that module's statuses, report, evidence and blocking logic. It authenticates through the active `az login` (no `--profile`), so the Unity Catalog catalog check always runs. Checks: workspace provisioning; VNet injection + no public IP (+ the client VNet for `custom`); all three workspace CMKs plus brought-key identity; the UC storage account's key; the metastore; catalog isolation and storage root; the compliance security profile; and centralized audit logging via the per-workspace diagnostic setting. It refuses to run if the shared root is initialized for a different workspace. |
 | `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. `workspace-request.schema.json` gained optional `network.connectivity` (§8 milestone 27); `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` (§8 milestone 28); and, §8 milestone 29, `network.existing_security_group_id`, a new top-level `encryption` object (`existing_workspace_storage_key_arn`/`_alias`, `existing_managed_services_key_arn`/`_alias` — the first requester-controlled `encryption` fields; `encryption.workspace`/`application_data` stay entirely profile-derived), `governance.existing_metastore_id` (alongside the milestone-22 `catalog_admin_principal` — the first two requester-controlled `governance` fields), and `cloud.databricks_account_id`. All mirrored into `normalized-config.schema.json` too. The latter's now-dead `network.requirements.subnets.allocation` sub-schema (count/AZs/cidr_source — superseded by real auto-allocation, §8 milestone 28) was removed. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. As of §8 milestone 35, `cloud.provider`'s enum gained `"azure"` (both schemas) and `normalized-config.schema.json`'s `cloud.account` pattern was relaxed to accept either a 12-digit AWS account id or a UUID-shaped Azure subscription id - no other schema change was needed since `network.vpc_cidr`/`governance.catalog_admin_principal`/etc. were already cloud-agnostic strings with no AWS-specific pattern. |
 | `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely — `policies/network.yaml`'s `allowed_strategies` is now the only thing with an opinion on network strategy per environment (§8 milestone 16). |
 | `policies/policies.yaml` | Working | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping + per-environment `allowed_strategies`, validation blocking per env), one key per domain (`network_policy`, `security_policy`, `data_policy`, `governance_policy`, `validation_policy`). Trimmed to only the fields `resolver.py` actually reads (§8 milestone 15), gained `network_policy.allowed_strategies` (§8 milestone 16), then merged from five separate files into this one 2026-10-14 (§8 milestone 18 — closes §5.13's config-layer complexity review). |
@@ -3631,6 +3632,97 @@ Priority order agreed on:
       Azure Private Link isn't built for anything in this factory yet),
       and key rotation policies on created keys.
 
+43. **Azure support in the workspace validation harness — closes §10
+    backlog item #8** (2026-10-21). With milestones 41/42, an Azure
+    `live` workspace became possible, but the `live` profile resolves
+    validation to **blocking with evidence required**, and no Azure
+    check existed, so such a workspace couldn't satisfy its own policy.
+    - **Structure**: same "parallel cloud-specific code, not branches"
+      split as `generate_tfvars_azure.py`. New
+      `resolver/validate_deployment_azure.py`, dispatched from
+      `validate_deployment.py`'s `main()`, which now finds the normalized
+      config via `loader.resolve_normalized_path()` (new optional
+      `--provider`, needed only for a name that exists on both clouds).
+      - `--profile` became AWS-only: Azure authenticates through the
+        active `az login`, with the databricks CLI pointed at the
+        workspace URL with `DATABRICKS_AUTH_TYPE=azure-cli`. So the
+        catalog check always runs on Azure (never `SKIPPED`).
+      - Statuses, report, evidence file, and blocking exit logic are
+        shared, factored into `_report()`.
+      - `get_terraform_outputs()` gained a root-directory parameter.
+      - Config/argument errors (`ValueError`/`FileNotFoundError`) now
+        print the clean "validation failed" message instead of a
+        traceback.
+    - **Checks**: `workspace.exists` (ARM `provisioningState`);
+      `network.required` (VNet injection + `enableNoPublicIp`, and for
+      `custom` that it's the requested client VNet);
+      `encryption.required` (managed services, managed disk and DBFS root
+      all `Microsoft.Keyvault`, plus that any **brought** key is the one
+      actually in use); `encryption.application_data` (new, not on AWS:
+      the UC storage account's key source/key);
+      `governance.unity_catalog` (a metastore is assigned, and matches an
+      explicit override if one exists); `governance.unity_catalog.catalog`
+      (`ISOLATED` + storage root on this workspace's ADLS account);
+      `governance.compliance_profile` (new, only when
+      `compliance_standards` is set); `identity.required`
+      (`NOT_IMPLEMENTED`, same as AWS).
+    - **`logging.centralized` is a real check on Azure, not
+      `NOT_IMPLEMENTED`**: milestone 40 built per-workspace diagnostic
+      settings, so it checks that one sends to the configured Log
+      Analytics workspace. A profile requiring centralized logging (all
+      three do) with **no** destination configured reports **FAIL**, with
+      the fix in the message (apply `infrastructure/azure/account/` with
+      `enable_audit_log_delivery`, record the id in
+      `platform/inventory/azure.yaml`). The mechanism exists; it just
+      isn't switched on. **Consequence: an Azure `live` workspace can't
+      pass blocking validation until that shared destination exists**
+      (or a `deployment.yaml` override points at one). That was a
+      deliberate honesty-over-convenience call; flag it if it should
+      differ.
+    - **Safety improvement over AWS**: the harness refuses to run if the
+      shared root's outputs belong to a different workspace (checked via
+      the `rg-<name>` naming convention), instead of trusting the
+      operator to have re-`init`ed. Two new root outputs
+      (`workspace_resource_id`, `unity_catalog_storage_account_name`)
+      mean the harness never recomputes resource names by convention.
+    - Verified:
+      - **Destroyed-state run** (`isolated-proof`): every check correctly
+        FAILs or is N/A, with no crash; the cross-provider name-ambiguity
+        and missing-`--profile` errors print cleanly.
+      - **Unit runs on synthetic ARM payloads**: logging unconfigured,
+        compliance profile disabled, public IP enabled, wrong VNet,
+        Microsoft-managed key, brought-key mismatch; each produces a
+        specific FAIL.
+      - **AWS regression**: same report shape as milestones 23/24
+        against AWS `isolated-proof`'s destroyed state.
+    - **Live run**: redeployed the throwaway `cmk-live-proof` (`live`,
+      `custom` VNet, brought managed-services key, created
+      workspace-storage/application-data keys, plus
+      `compliance_standards: [HIPAA]` and a throwaway Log Analytics
+      destination via a `deployment.yaml` override).
+      - This **also proved milestone 42's random vault suffix**: the same
+        workspace name redeployed while its previous vault was still
+        soft-deleted, getting a new vault name.
+      - The first apply died on a transient Azure connection reset
+        ("HTTP response was nil") at an NSG association. The harness run
+        against that half-built state correctly blocked (exit 1,
+        evidence written). A plain re-apply finished the remaining 13
+        resources.
+      - Validator: **8 PASS, 1 NOT_IMPLEMENTED, exit 0**, evidence
+        written.
+      - A tampered expectation (a different brought key) produced a
+        specific `encryption.required` FAIL and **exit 1**. Validating a
+        different workspace name while the root pointed here was refused.
+        Follow-up plan: **No changes**.
+      - Torn down after: the usual `state rm` of the two locked legacy
+        settings, then destroy, the managed-resource-group orphan, the
+        fixture resource group, the state blob and the pipeline files.
+    - **Noticed, not changed**: the AWS harness's
+      `logging.centralized: NOT_IMPLEMENTED` message ("no
+      audit-log-delivery Terraform resource exists") went stale in
+      milestone 39. AWS audit delivery is account-level, so a
+      per-workspace check there would need a different design.
+
 ## 9. Conventions observed (keep consistent)
 
 - Every top-level cloud-specific location is grouped under a `<cloud>/`
@@ -3817,10 +3909,9 @@ deleting it silently.
 7. ~~**Azure customer-managed encryption**~~ — **done, see §8
    milestone 42** (created + brought keys, applied for real against a
    `live`-shaped workspace and torn down).
-8. **`validate_deployment.py` Azure support** (deferred from
-   milestone 35) — the workspace-level validation harness (§8
-   milestone 23) is AWS-only; Azure workspaces have no equivalent
-   post-apply check today.
+8. ~~**`validate_deployment.py` Azure support**~~ — **done, see §8
+   milestone 43** (8 PASS + 1 NOT_IMPLEMENTED against a live `live`
+   workspace).
 9. **`governance.workspace_binding`'s per-environment differentiation**
    (open since §5.14 / milestone 19 — the oldest item on this list).
    Every workspace's catalog is unconditionally `ISOLATED` regardless

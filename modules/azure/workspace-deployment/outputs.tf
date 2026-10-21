@@ -16,3 +16,8 @@ output "resource_group_name" {
 output "application_data_key" {
   value = try(module.kms[0].application_data_key, null)
 }
+
+output "workspace_resource_id" {
+  description = "ARM id of the azurerm_databricks_workspace - read by resolver/validate_deployment_azure.py."
+  value       = azurerm_databricks_workspace.this.id
+}
