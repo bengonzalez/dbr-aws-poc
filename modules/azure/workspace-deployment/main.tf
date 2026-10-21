@@ -19,13 +19,16 @@ resource "azurerm_resource_group" "this" {
 module "network" {
   source = "../workspace-network"
 
-  workspace_name      = var.workspace.name
-  location            = var.cloud.region
-  resource_group_name = azurerm_resource_group.this.name
-  vpc_cidr            = var.network.vpc_cidr
-  public_subnet_cidr  = var.network.public_subnet_cidr
-  private_subnet_cidr = var.network.private_subnet_cidr
-  tags                = local.common_tags
+  workspace_name             = var.workspace.name
+  location                   = var.cloud.region
+  resource_group_name        = azurerm_resource_group.this.name
+  vpc_cidr                   = var.network.vpc_cidr
+  public_subnet_cidr         = var.network.public_subnet_cidr
+  private_subnet_cidr        = var.network.private_subnet_cidr
+  existing_vnet_id           = var.network.existing_vnet_id
+  existing_public_subnet_id  = var.network.existing_public_subnet_id
+  existing_private_subnet_id = var.network.existing_private_subnet_id
+  tags                       = local.common_tags
 }
 
 # Dedicated access connector for default_storage_firewall_enabled below -

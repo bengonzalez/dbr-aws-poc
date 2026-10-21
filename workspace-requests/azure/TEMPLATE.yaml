@@ -1,12 +1,11 @@
 api_version: v1
 
 # Azure request template - deliberately much smaller than workspace-requests/
-# aws/TEMPLATE.yaml. Azure support (CLAUDE.md Sec8 milestone 35) is scoped
-# to only what a real-subscription spike validated: an "isolated"-equivalent
-# strategy (always a brand-new, Terraform-owned VNet). No existing-VNet
-# reuse, no customer-managed encryption, and none of the aws/TEMPLATE.yaml's
-# existing_*/override fields exist for Azure yet - see milestone 35 for
-# what's explicitly deferred.
+# aws/TEMPLATE.yaml. Azure supports "isolated" (a brand-new, Terraform-owned
+# VNet, CLAUDE.md Sec8 milestone 35) and "custom" (reuse your own VNet,
+# milestone 41). No customer-managed encryption yet, and of the
+# aws/TEMPLATE.yaml's existing_*/override fields only the VNet/subnet ones
+# below exist for Azure.
 
 request:
   id: REQ-XXXXX
@@ -36,13 +35,40 @@ data:
   classification: internal
 
 network:
-  strategy: isolated # the only strategy Azure supports today
+  # isolated | custom
+  #   isolated - a brand-new VNet, created and owned by Terraform.
+  #   custom   - reuse a VNet you already have (the only option for 'live',
+  #              see policies/policies.yaml's allowed_strategies).
+  strategy: isolated
+
+  # --- isolated only ---
   # Your own address-space choice for this brand-new VNet - needs at least
   # a /23 (two /24 subnets are carved out of it automatically). Azure has
   # no reserved-pool/collision-checker equivalent yet (resolver/
   # check_cidr_allocations.py is AWS-only), so just pick something that
   # doesn't collide with any other VNet you manage.
   vpc_cidr: 10.x.x.x/23
+
+  # --- custom only ---
+  # Full resource id of your VNet. Must be in the same subscription as the
+  # workspace. Required for custom - there's no default VNet for Azure.
+  # existing_vpc_id: /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/<name>
+  #
+  # Then EITHER let the platform create two delegated /24 subnets (plus an
+  # NSG) inside it - give one of the VNet's address-space ranges to carve
+  # from; the chosen ranges are pinned permanently in this workspace's
+  # allocated-subnets.yaml and avoided by any later workspace in the same
+  # VNet:
+  # existing_vpc_cidr: 10.x.0.0/16
+  #
+  # OR adopt two subnets you already made - exactly two, [public, private]
+  # in that order, each already delegated to Microsoft.Databricks/workspaces
+  # with an NSG associated, and not used by any other workspace. These are
+  # invisible to the auto-allocation above, so don't mix the two styles in
+  # the same VNet without leaving the adopted ranges out of the way.
+  # existing_subnet_ids:
+  #   - /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/<name>/subnets/<public>
+  #   - /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/<name>/subnets/<private>
 
 tags:
   cost_center: your-cost-center

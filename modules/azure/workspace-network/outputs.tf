@@ -1,23 +1,25 @@
 output "virtual_network_id" {
-  value = azurerm_virtual_network.this.id
+  value = local.vnet_id
 }
 
 output "network_security_group_id" {
-  value = azurerm_network_security_group.this.id
+  value = local.create_subnets ? azurerm_network_security_group.this[0].id : data.azurerm_subnet.existing_public[0].network_security_group_id
 }
 
 output "public_subnet_name" {
-  value = azurerm_subnet.public.name
+  value = local.create_subnets ? azurerm_subnet.public[0].name : data.azurerm_subnet.existing_public[0].name
 }
 
+# An azurerm_subnet_network_security_group_association's id is the subnet's
+# own id, so an adopted subnet's id stands in for it directly.
 output "public_subnet_nsg_association_id" {
-  value = azurerm_subnet_network_security_group_association.public.id
+  value = local.create_subnets ? azurerm_subnet_network_security_group_association.public[0].id : data.azurerm_subnet.existing_public[0].id
 }
 
 output "private_subnet_name" {
-  value = azurerm_subnet.private.name
+  value = local.create_subnets ? azurerm_subnet.private[0].name : data.azurerm_subnet.existing_private[0].name
 }
 
 output "private_subnet_nsg_association_id" {
-  value = azurerm_subnet_network_security_group_association.private.id
+  value = local.create_subnets ? azurerm_subnet_network_security_group_association.private[0].id : data.azurerm_subnet.existing_private[0].id
 }

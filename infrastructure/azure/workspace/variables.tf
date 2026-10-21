@@ -46,12 +46,15 @@ variable "ownership" {
 }
 
 variable "network" {
-  description = "Azure VNet-injection network inputs - a brand-new, Terraform-owned VNet only (no existing-VNet reuse yet, see modules/azure-workspace-network)."
+  description = "Azure VNet-injection network inputs - see modules/azure/workspace-network for the three shapes (new VNet / client VNet + new subnets / client VNet + adopted subnets)."
 
   type = object({
-    vpc_cidr            = string
-    public_subnet_cidr  = string
-    private_subnet_cidr = string
+    vpc_cidr                   = optional(string)
+    public_subnet_cidr         = optional(string)
+    private_subnet_cidr        = optional(string)
+    existing_vnet_id           = optional(string)
+    existing_public_subnet_id  = optional(string)
+    existing_private_subnet_id = optional(string)
   })
 }
 

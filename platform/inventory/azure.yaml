@@ -20,11 +20,11 @@ platform:
 # naming), a fixed convention baked into modules/azure-workspace-network
 # rather than an inventory-driven allocation.
 #
-# Scope note: only the "isolated"-equivalent strategy (always a brand-new,
-# Terraform-owned VNet) is supported today - there is no existing-VNet
-# reuse yet, so there's also no "networks.primary" vpc/routing block here
-# the way aws.yaml has one. Add that only once an Azure "custom" strategy
-# is actually built.
+# Scope note: Azure "custom" (existing-VNet reuse, CLAUDE.md §8 milestone
+# 41) takes the VNet id/CIDR straight from the request - there's
+# deliberately no "networks.primary" default-VNet block here the way
+# aws.yaml has one. Add it only if a real "every workspace in this
+# subscription lands in the same hub VNet" need shows up.
 azure:
   accounts:
     dev:

@@ -188,12 +188,12 @@
 
         "existing_vpc_id": {
           "type": "string",
-          "description": "ID of an existing VPC the client is handing over for 'custom' strategy. Optional - when omitted, the AWS account's known 'primary' network (platform/inventory/aws.yaml) is used by default, same as today."
+          "description": "ID of an existing VPC the client is handing over for 'custom' strategy. Optional - when omitted, the AWS account's known 'primary' network (platform/inventory/aws.yaml) is used by default, same as today. Azure: the full resource id of the client's VNet (/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/<name>) - required for Azure 'custom', no inventory default."
         },
 
         "existing_vpc_cidr": {
           "type": "string",
-          "description": "CIDR block of the VPC named by existing_vpc_id, needed only when that VPC is not already known in platform/inventory/aws.yaml - lets subnet auto-allocation know the address space to carve from. Ignored if the VPC is already known in inventory."
+          "description": "CIDR block of the VPC named by existing_vpc_id, needed only when that VPC is not already known in platform/inventory/aws.yaml - lets subnet auto-allocation know the address space to carve from. Ignored if the VPC is already known in inventory. Azure: one of the VNet's address-space ranges, required for Azure 'custom' unless existing_subnet_ids is given (there is no Azure inventory to look it up from)."
         },
 
         "existing_security_group_id": {
@@ -215,7 +215,7 @@
           "items": {
             "type": "string"
           },
-          "description": "IDs of existing subnets inside existing_vpc_id to use for the workspace, instead of having Terraform create new ones. Optional - omit for Terraform to auto-allocate and create new subnets (today's default). Known limitation: because these subnets' CIDRs are never looked up, they're invisible to resolver/check_cidr_allocations.py's collision checker - avoid also using auto-allocation for a sibling workspace in the same VPC."
+          "description": "IDs of existing subnets inside existing_vpc_id to use for the workspace, instead of having Terraform create new ones. Optional - omit for Terraform to auto-allocate and create new subnets (today's default). Known limitation: because these subnets' CIDRs are never looked up, they're invisible to resolver/check_cidr_allocations.py's collision checker - avoid also using auto-allocation for a sibling workspace in the same VPC. Azure: exactly two, [public, private] in that order, each already delegated to Microsoft.Databricks/workspaces with an NSG associated."
         }
       },
 
