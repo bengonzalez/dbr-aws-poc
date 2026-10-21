@@ -273,7 +273,22 @@ def ensure_subnet_allocation(
     return merged_deployment
 
 
+AZURE_KEY_VAULT_KEYS = (
+    "existing_workspace_storage_key_id",
+    "existing_managed_services_key_id",
+    "existing_application_data_key_id",
+)
+
+
 def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
+    azure_only = [key for key in AZURE_KEY_VAULT_KEYS if key in normalized["encryption"]]
+
+    if azure_only:
+        raise ValueError(
+            f"encryption.{', encryption.'.join(azure_only)} are Azure Key "
+            f"Vault fields - on AWS, use the existing_*_key_arn fields instead."
+        )
+
     """
     Combine a resolver normalized config with the small set of
     deployment-only values Terraform needs but the resolver does not

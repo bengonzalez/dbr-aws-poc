@@ -67,11 +67,14 @@ variable "data" {
 }
 
 variable "encryption" {
-  description = "Resolved encryption posture. Only platform_managed is supported for Azure today - customer_managed (Key Vault) is an explicitly deferred future enhancement, enforced in resolver/generate_tfvars_azure.py before this ever reaches Terraform."
+  description = "Resolved encryption posture, plus optional brought Key Vault keys (full ARM key ids). See modules/azure/workspace-kms."
 
   type = object({
-    workspace        = string
-    application_data = string
+    workspace                         = string
+    application_data                  = string
+    existing_workspace_storage_key_id = optional(string)
+    existing_managed_services_key_id  = optional(string)
+    existing_application_data_key_id  = optional(string)
   })
 }
 

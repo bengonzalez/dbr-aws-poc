@@ -31,6 +31,30 @@ module "network" {
   tags                       = local.common_tags
 }
 
+locals {
+  workspace_cmk_enabled        = var.encryption.workspace == "customer_managed"
+  application_data_cmk_enabled = var.encryption.application_data == "customer_managed"
+}
+
+# Customer-managed keys (CLAUDE.md §8 milestone 42). Called whenever either
+# encryption setting is customer_managed - the application_data key is
+# consumed by the root's Unity Catalog storage account, not here (see
+# outputs.tf).
+module "kms" {
+  count  = local.workspace_cmk_enabled || local.application_data_cmk_enabled ? 1 : 0
+  source = "../workspace-kms"
+
+  workspace_name                    = var.workspace.name
+  resource_group_name               = azurerm_resource_group.this.name
+  location                          = var.cloud.region
+  workspace_cmk_enabled             = local.workspace_cmk_enabled
+  application_data_cmk_enabled      = local.application_data_cmk_enabled
+  existing_workspace_storage_key_id = var.encryption.existing_workspace_storage_key_id
+  existing_managed_services_key_id  = var.encryption.existing_managed_services_key_id
+  existing_application_data_key_id  = var.encryption.existing_application_data_key_id
+  tags                              = local.common_tags
+}
+
 # Dedicated access connector for default_storage_firewall_enabled below -
 # the azurerm provider requires access_connector_id whenever that firewall
 # is enabled, so Databricks' control plane can still reach the
@@ -70,6 +94,18 @@ resource "azurerm_databricks_workspace" "this" {
   default_storage_firewall_enabled = true
   access_connector_id              = azurerm_databricks_access_connector.dbfs.id
 
+  # Customer-managed keys - managed services is checked by Azure at create
+  # time (the kms module's output waits on its grant); managed disks and
+  # DBFS root are granted to identities this resource creates, below. Both
+  # managed-services and managed-disk CMK are one-way once enabled, per
+  # Databricks' docs.
+  customer_managed_key_enabled                        = local.workspace_cmk_enabled
+  managed_services_cmk_key_vault_key_id               = local.workspace_cmk_enabled ? module.kms[0].managed_services_key.key_id : null
+  managed_services_cmk_key_vault_id                   = local.workspace_cmk_enabled ? module.kms[0].managed_services_key.key_vault_id : null
+  managed_disk_cmk_key_vault_key_id                   = local.workspace_cmk_enabled ? module.kms[0].workspace_storage_key.key_id : null
+  managed_disk_cmk_key_vault_id                       = local.workspace_cmk_enabled ? module.kms[0].workspace_storage_key.key_vault_id : null
+  managed_disk_cmk_rotation_to_latest_version_enabled = local.workspace_cmk_enabled ? true : null
+
   enhanced_security_compliance {
     automatic_cluster_update_enabled      = length(var.compliance_standards) > 0
     compliance_security_profile_enabled   = length(var.compliance_standards) > 0
@@ -91,6 +127,46 @@ resource "azurerm_databricks_workspace" "this" {
   depends_on = [
     module.network,
   ]
+}
+
+# Post-create CMK grants: the disk encryption set and the workspace storage
+# account each get a system identity only once the workspace exists, so
+# they're granted here, after it (Databricks' documented order for both).
+resource "azurerm_role_assignment" "managed_disk_cmk" {
+  count = local.workspace_cmk_enabled ? 1 : 0
+
+  scope                = module.kms[0].workspace_storage_key.resource_id
+  role_definition_name = "Key Vault Crypto Service Encryption User"
+  principal_id         = azurerm_databricks_workspace.this.managed_disk_identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "dbfs_cmk" {
+  count = local.workspace_cmk_enabled ? 1 : 0
+
+  scope                = module.kms[0].workspace_storage_key.resource_id
+  role_definition_name = "Key Vault Crypto Service Encryption User"
+  principal_id         = azurerm_databricks_workspace.this.storage_account_identity[0].principal_id
+}
+
+resource "time_sleep" "workspace_cmk_rbac_propagation" {
+  count = local.workspace_cmk_enabled ? 1 : 0
+
+  create_duration = "60s"
+
+  depends_on = [
+    azurerm_role_assignment.managed_disk_cmk,
+    azurerm_role_assignment.dbfs_cmk,
+  ]
+}
+
+resource "azurerm_databricks_workspace_root_dbfs_customer_managed_key" "this" {
+  count = local.workspace_cmk_enabled ? 1 : 0
+
+  workspace_id     = azurerm_databricks_workspace.this.id
+  key_vault_key_id = module.kms[0].workspace_storage_key.key_id
+  key_vault_id     = module.kms[0].workspace_storage_key.key_vault_id
+
+  depends_on = [time_sleep.workspace_cmk_rbac_propagation]
 }
 
 # Per-workspace audit-log enablement, pointed at a shared Log Analytics

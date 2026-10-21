@@ -254,6 +254,21 @@
         "existing_managed_services_key_alias": {
           "type": "string",
           "description": "Alias name of the existing managed services key named above, if any."
+        },
+
+        "existing_workspace_storage_key_id": {
+          "type": "string",
+          "description": "Azure only: full ARM resource id of an existing Key Vault key (/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.KeyVault/vaults/<vault>/keys/<key>) for managed disks + DBFS root, instead of one the platform creates. The vault must be RBAC-mode with purge protection, in the workspace's region and tenant, and the deploying identity must be able to assign roles on it. Only meaningful when encryption.workspace resolves to 'customer_managed'."
+        },
+
+        "existing_managed_services_key_id": {
+          "type": "string",
+          "description": "Azure only: full ARM resource id of an existing Key Vault key for managed services (notebooks, secrets, queries). Same vault requirements as existing_workspace_storage_key_id."
+        },
+
+        "existing_application_data_key_id": {
+          "type": "string",
+          "description": "Azure only: full ARM resource id of an existing Key Vault key for the Unity Catalog storage account. Same vault requirements as existing_workspace_storage_key_id. Only meaningful when encryption.application_data resolves to 'customer_managed'."
         }
       }
     },

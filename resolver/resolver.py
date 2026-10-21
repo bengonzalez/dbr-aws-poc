@@ -295,6 +295,10 @@ def resolve_configuration(
         "existing_workspace_storage_key_alias",
         "existing_managed_services_key_arn",
         "existing_managed_services_key_alias",
+        # Azure's Key Vault equivalents (CLAUDE.md §8 milestone 42).
+        "existing_workspace_storage_key_id",
+        "existing_managed_services_key_id",
+        "existing_application_data_key_id",
     ):
         if key in request_encryption:
             encryption[key] = request_encryption[key]

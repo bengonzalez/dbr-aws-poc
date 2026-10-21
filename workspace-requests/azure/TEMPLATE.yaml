@@ -3,9 +3,9 @@ api_version: v1
 # Azure request template - deliberately much smaller than workspace-requests/
 # aws/TEMPLATE.yaml. Azure supports "isolated" (a brand-new, Terraform-owned
 # VNet, CLAUDE.md Sec8 milestone 35) and "custom" (reuse your own VNet,
-# milestone 41). No customer-managed encryption yet, and of the
-# aws/TEMPLATE.yaml's existing_*/override fields only the VNet/subnet ones
-# below exist for Azure.
+# milestone 41), with customer-managed Key Vault encryption, created or
+# brought (milestone 42). Of the aws/TEMPLATE.yaml's existing_*/override
+# fields, only the VNet/subnet/key ones below exist for Azure.
 
 request:
   id: REQ-XXXXX
@@ -29,10 +29,23 @@ ownership:
   business_owner: your-business-sponsor
 
 data:
-  # Must resolve to platform_managed encryption for now - customer_managed
-  # (Key Vault) isn't built for Azure yet. Check policies/policies.yaml's
-  # data_policy.classifications for what each value resolves to.
+  # Drives (with the environment's profile) whether encryption is
+  # platform_managed or customer_managed - see policies/policies.yaml's
+  # data_policy.classifications. 'live' is always customer_managed.
   classification: internal
+
+# Optional, only for customer_managed workspaces: bring your own Key Vault
+# keys instead of having the platform create a dedicated vault + keys. Any
+# subset works - unset keys are still created. Each is a full key resource
+# id; the vault must be RBAC-mode with purge protection, in the same
+# region/tenant as the workspace, and the deployer must be able to assign
+# roles on it (the platform grants Databricks' identities access to each
+# key). Not combinable with FedRAMP compliance_standards (Databricks
+# doesn't support managed-disk keys there).
+# encryption:
+#   existing_workspace_storage_key_id: /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.KeyVault/vaults/<vault>/keys/<key>  # managed disks + DBFS root
+#   existing_managed_services_key_id:  /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.KeyVault/vaults/<vault>/keys/<key>  # notebooks, secrets, queries
+#   existing_application_data_key_id:  /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.KeyVault/vaults/<vault>/keys/<key>  # Unity Catalog storage
 
 network:
   # isolated | custom

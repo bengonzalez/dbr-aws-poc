@@ -6,6 +6,7 @@ module "deployment" {
   application                = var.application
   ownership                  = var.ownership
   network                    = var.network
+  encryption                 = var.encryption
   tags                       = local.common_tags
   compliance_standards       = var.compliance_standards
   log_analytics_workspace_id = var.log_analytics_workspace_id
@@ -29,7 +30,10 @@ module "unity_catalog_data" {
   resource_group_name  = module.deployment.resource_group_name
   location             = var.cloud.region
   storage_account_name = local.storage_account_name
-  tags                 = local.common_tags
+  application_data_key = module.deployment.application_data_key
+
+  application_data_cmk_enabled = var.encryption.application_data == "customer_managed"
+  tags                         = local.common_tags
 }
 
 module "unity_catalog_workspace" {

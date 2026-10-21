@@ -15,8 +15,9 @@ Scope: 'isolated' (a brand-new, Terraform-owned VNet, CLAUDE.md §8
 milestone 35) and 'custom' (a client-provided VNet - Terraform creates two
 delegated subnets inside it, auto-allocated and pinned the same way as
 AWS's milestone-28 allocation, or adopts two existing ones, same as AWS's
-milestone-33 existing_subnet_ids - CLAUDE.md §8 milestone 41). No
-customer-managed encryption, no KMS-equivalent bring-your-own-key yet.
+milestone-33 existing_subnet_ids - CLAUDE.md §8 milestone 41).
+Customer-managed Key Vault encryption, created or brought: CLAUDE.md §8
+milestone 42.
 """
 
 from pathlib import Path
@@ -252,6 +253,89 @@ def ensure_custom_subnet_allocation(
     return {**deployment, "network": network}
 
 
+AZURE_KEY_ID_PATTERN = re.compile(
+    r"^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/"
+    r"Microsoft\.KeyVault/vaults/[^/]+/keys/[^/]+$",
+    re.IGNORECASE,
+)
+
+# Which encryption setting each brought key belongs to.
+AZURE_KEY_FIELDS = {
+    "existing_workspace_storage_key_id": "workspace",
+    "existing_managed_services_key_id": "workspace",
+    "existing_application_data_key_id": "application_data",
+}
+
+AWS_KEY_FIELDS = (
+    "existing_workspace_storage_key_arn",
+    "existing_workspace_storage_key_alias",
+    "existing_managed_services_key_arn",
+    "existing_managed_services_key_alias",
+)
+
+
+def resolve_encryption_azure(normalized: dict) -> dict:
+    """
+    Validate the resolved encryption block for Azure (CLAUDE.md §8
+    milestone 42) and return it as the root's var.encryption expects:
+    workspace/application_data plus any brought Key Vault key ids.
+
+    Fails loudly rather than silently ignoring: AWS KMS fields on an Azure
+    request, a malformed key id, a brought key whose encryption setting
+    isn't customer_managed (it would never be used), and customer-managed
+    workspace keys combined with a FedRAMP compliance standard (Databricks
+    documents managed-disk CMK as unsupported for FedRAMP workspaces).
+    """
+
+    encryption = normalized["encryption"]
+
+    aws_fields = [key for key in AWS_KEY_FIELDS if key in encryption]
+
+    if aws_fields:
+        raise ValueError(
+            f"encryption.{', encryption.'.join(aws_fields)} are AWS KMS "
+            f"fields - on Azure, use the existing_*_key_id fields (full "
+            f"Key Vault key resource ids) instead."
+        )
+
+    for field, setting in AZURE_KEY_FIELDS.items():
+        key_id = encryption.get(field)
+
+        if key_id is None:
+            continue
+
+        if not AZURE_KEY_ID_PATTERN.match(key_id):
+            raise ValueError(
+                f"encryption.{field} '{key_id}' is not a full Key Vault key "
+                f"resource id (/subscriptions/<sub>/resourceGroups/<rg>/"
+                f"providers/Microsoft.KeyVault/vaults/<vault>/keys/<key>)."
+            )
+
+        if encryption[setting] != "customer_managed":
+            raise ValueError(
+                f"encryption.{field} is set, but encryption.{setting} "
+                f"resolves to '{encryption[setting]}' for this workspace's "
+                f"profile/classification - the key would never be used."
+            )
+
+    compliance_standards = normalized["governance"].get("compliance_standards") or []
+
+    fedramp = [standard for standard in compliance_standards if "FEDRAMP" in standard.upper()]
+
+    if encryption["workspace"] == "customer_managed" and fedramp:
+        raise ValueError(
+            f"Customer-managed workspace keys can't be combined with "
+            f"{', '.join(fedramp)}: Databricks documents managed-disk CMK as "
+            f"unsupported for FedRAMP-compliance workspaces."
+        )
+
+    return {
+        key: value
+        for key, value in encryption.items()
+        if key in ("workspace", "application_data") or key in AZURE_KEY_FIELDS
+    }
+
+
 def resolve_azure_account_inventory(account_id: str, inventory: dict) -> dict:
     """
     Find the platform/inventory/azure.yaml 'accounts' entry matching a
@@ -307,16 +391,7 @@ def build_tfvars_azure(normalized: dict, deployment: dict, inventory: dict) -> d
             f"Azure - only 'isolated' and 'custom'."
         )
 
-    encryption = normalized["encryption"]
-
-    if encryption["workspace"] == "customer_managed":
-        raise ValueError(
-            "encryption.workspace == 'customer_managed' is not yet "
-            "supported for Azure - customer-managed Key Vault encryption "
-            "is an explicitly deferred future enhancement. This workspace's "
-            "profile/classification currently resolves to customer_managed, "
-            "which only the AWS path can satisfy today."
-        )
+    encryption = resolve_encryption_azure(normalized)
 
     governance = {**normalized["governance"]}
     catalog_admin_principal = governance.pop("catalog_admin_principal", None)

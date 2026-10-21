@@ -311,6 +311,15 @@
         },
         "existing_managed_services_key_alias": {
           "type": "string"
+        },
+        "existing_workspace_storage_key_id": {
+          "type": "string"
+        },
+        "existing_managed_services_key_id": {
+          "type": "string"
+        },
+        "existing_application_data_key_id": {
+          "type": "string"
         }
       },
       "required": [

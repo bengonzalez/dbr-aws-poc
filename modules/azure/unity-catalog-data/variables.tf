@@ -18,6 +18,23 @@ variable "storage_account_name" {
   type        = string
 }
 
+variable "application_data_cmk_enabled" {
+  description = "Whether application_data_key is in use. A separate, plan-time-known flag: application_data_key's own nullness isn't known at plan when the key is created in the same run, so it can't drive count."
+  type        = bool
+  default     = false
+}
+
+variable "application_data_key" {
+  description = "Customer-managed key for the UC storage account, from modules/azure/workspace-kms's application_data_key output. Null (default) leaves the account on Microsoft-managed keys."
+  type = object({
+    key_id         = string
+    versionless_id = string
+    resource_id    = string
+    key_vault_id   = string
+  })
+  default = null
+}
+
 variable "tags" {
   description = "Tags applied to every resource in this module."
   type        = map(string)

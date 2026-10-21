@@ -2,6 +2,11 @@ provider "azurerm" {
   features {}
 }
 
+# Only used to look up the AzureDatabricks first-party app's per-tenant
+# object id for customer-managed keys (modules/azure/workspace-kms). Same
+# `az` CLI session as azurerm - no separate auth.
+provider "azuread" {}
+
 # Workspace-URL-scoped provider for Unity Catalog, referencing
 # module.deployment's own azurerm_databricks_workspace output. This has to
 # live here, in the root - Terraform does not allow a non-root module to

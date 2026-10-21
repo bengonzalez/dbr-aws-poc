@@ -25,7 +25,54 @@ resource "azurerm_storage_account" "unity_catalog_data" {
   account_kind             = "StorageV2"
   is_hns_enabled           = true # required for ADLS Gen2
 
+  # Only when a customer-managed key is in play - the storage account's own
+  # system identity is what reads the key (granted below). Left off
+  # otherwise so platform-managed workspaces see no change.
+  dynamic "identity" {
+    for_each = var.application_data_cmk_enabled ? [1] : []
+
+    content {
+      type = "SystemAssigned"
+    }
+  }
+
   tags = var.tags
+
+  # azurerm_storage_account_customer_managed_key below owns the account's
+  # encryption settings; without this the storage account resource would
+  # try to revert them on every plan.
+  lifecycle {
+    ignore_changes = [customer_managed_key]
+  }
+}
+
+# Application-data CMK (CLAUDE.md §8 milestone 42) - the Azure analog of
+# modules/aws/unity-catalog-data's own KMS key. The key itself comes from
+# modules/azure/workspace-kms (created there or brought by the client).
+resource "azurerm_role_assignment" "application_data_cmk" {
+  count = var.application_data_cmk_enabled ? 1 : 0
+
+  scope                = var.application_data_key.resource_id
+  role_definition_name = "Key Vault Crypto Service Encryption User"
+  principal_id         = azurerm_storage_account.unity_catalog_data.identity[0].principal_id
+}
+
+resource "time_sleep" "application_data_cmk_rbac_propagation" {
+  count = var.application_data_cmk_enabled ? 1 : 0
+
+  create_duration = "60s"
+
+  depends_on = [azurerm_role_assignment.application_data_cmk]
+}
+
+resource "azurerm_storage_account_customer_managed_key" "unity_catalog_data" {
+  count = var.application_data_cmk_enabled ? 1 : 0
+
+  storage_account_id = azurerm_storage_account.unity_catalog_data.id
+  # Versionless, so the account follows key rotation automatically.
+  key_vault_key_id = var.application_data_key.versionless_id
+
+  depends_on = [time_sleep.application_data_cmk_rbac_propagation]
 }
 
 resource "azurerm_storage_data_lake_gen2_filesystem" "unity_catalog_data" {

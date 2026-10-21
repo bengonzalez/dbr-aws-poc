@@ -49,6 +49,17 @@ variable "network" {
   })
 }
 
+variable "encryption" {
+  description = "Resolved encryption posture. customer_managed provisions (or uses brought) Key Vault keys via modules/azure/workspace-kms - see that module for the three keys and the existing_*_key_id formats."
+  type = object({
+    workspace                         = string
+    application_data                  = string
+    existing_workspace_storage_key_id = optional(string)
+    existing_managed_services_key_id  = optional(string)
+    existing_application_data_key_id  = optional(string)
+  })
+}
+
 variable "tags" {
   description = "Tags applied to every resource in this module."
   type        = map(string)
