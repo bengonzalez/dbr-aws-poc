@@ -89,3 +89,28 @@ resource "azurerm_databricks_workspace" "this" {
     module.network,
   ]
 }
+
+# Per-workspace audit-log enablement, pointed at a shared Log Analytics
+# destination (CLAUDE.md §10 backlog item #1a / §8 milestone 40). Real
+# finding: Azure has no account-level "turn on audit logging for every
+# workspace" switch the way AWS's databricks_mws_log_delivery is -
+# azurerm_monitor_diagnostic_setting is always scoped to one
+# target_resource_id (confirmed from the azurerm provider's own docs),
+# so each workspace needs its own copy of this resource, not a single
+# account-wide setup. log_analytics_workspace_id is resolved the same
+# way as AWS's network_policy_id - at config-generation time in Python
+# (resolver/generate_tfvars_azure.py), never via Terraform remote state.
+resource "azurerm_monitor_diagnostic_setting" "audit_logs" {
+  count = var.log_analytics_workspace_id != null ? 1 : 0
+
+  name                       = "${var.workspace.name}-audit-logs"
+  target_resource_id         = azurerm_databricks_workspace.this.id
+  log_analytics_workspace_id = var.log_analytics_workspace_id
+
+  dynamic "enabled_log" {
+    for_each = var.audit_log_categories
+    content {
+      category = enabled_log.value
+    }
+  }
+}

@@ -93,6 +93,31 @@ variable "compliance_standards" {
   default     = []
 }
 
+variable "databricks_account_id" {
+  description = "ID of the Azure-linked Databricks account - only needed when network_policy_id is set (the provider block that attaches it requires one, even though most workspaces never set either). Null (default) is harmless when network_policy_id is also null. See infrastructure/azure/account/, CLAUDE.md §10 backlog item #1a / §8 milestone 40."
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "network_policy_id" {
+  description = "ID of an account-level Databricks network policy (see infrastructure/aws/account/'s Azure analog, infrastructure/azure/account/) to attach to this workspace. Null (default) leaves the workspace on the account's own un-deletable default-policy, unchanged from today's behavior."
+  type        = string
+  default     = null
+}
+
+variable "log_analytics_workspace_id" {
+  description = "ID of the shared Log Analytics workspace (see infrastructure/azure/account/) this workspace's audit logs should be delivered to. Null (default) creates no diagnostic setting at all - audit logging stays off, same as today."
+  type        = string
+  default     = null
+}
+
+variable "audit_log_categories" {
+  description = "Databricks workspace diagnostic log categories to enable when log_analytics_workspace_id is set. See modules/azure/workspace-deployment's own variable of the same name for the full description/default."
+  type        = list(string)
+  default     = ["accounts", "clusters", "dbfs", "jobs", "notebook", "secrets", "sqlPermissions", "ssh", "unityCatalog", "workspace"]
+}
+
 variable "compute" {
   description = "Compute policy."
 

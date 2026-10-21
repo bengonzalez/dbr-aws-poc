@@ -16,3 +16,18 @@ provider "databricks" {
   host      = "https://${module.deployment.workspace_url}"
   auth_type = "azure-cli"
 }
+
+# Account-level provider, needed only for databricks_workspace_network_option
+# below (CLAUDE.md §10 backlog item #1a / §8 milestone 40) - its own docs
+# say it "can only be used with an account-level provider," unlike every
+# other Databricks resource in this root, which uses the workspace-scoped
+# provider above. account_id defaults to null when no workspace in this
+# root ever sets network_policy_id - a provider block with a null,
+# never-dereferenced argument is harmless.
+provider "databricks" {
+  alias = "mws"
+
+  host       = "https://accounts.azuredatabricks.net"
+  account_id = var.databricks_account_id
+  auth_type  = "azure-cli"
+}

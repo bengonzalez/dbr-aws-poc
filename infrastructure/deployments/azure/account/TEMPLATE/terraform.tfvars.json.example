@@ -1,0 +1,11 @@
+{
+  "region": "southcentralus",
+  "databricks_account_id": "REPLACE-ME-run-databricks-auth-login-first",
+  "resource_prefix": "databricks-platform",
+  "enable_legacy_features": false,
+  "enable_network_policy": false,
+  "restrict_egress": false,
+  "allowed_internet_destinations": [],
+  "context_based_ingress_ip_acl": [],
+  "enable_audit_log_delivery": false
+}

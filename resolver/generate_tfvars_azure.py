@@ -47,7 +47,23 @@ def derive_subnet_cidrs(vpc_cidr: str) -> tuple[str, str]:
     return public_subnet_cidr, private_subnet_cidr
 
 
-def build_tfvars_azure(normalized: dict, deployment: dict) -> dict:
+def resolve_azure_account_inventory(account_id: str, inventory: dict) -> dict:
+    """
+    Find the platform/inventory/azure.yaml 'accounts' entry matching a
+    request's Azure subscription id - same generic account-matching
+    loop resolver.py's resolve_configuration() already does at request
+    time, duplicated here (not imported) since this runs later, in the
+    tfvars-generation stage, with only `normalized` to go on.
+    """
+
+    for account in inventory.get("azure", {}).get("accounts", {}).values():
+        if account.get("account_id") == account_id:
+            return account
+
+    return {}
+
+
+def build_tfvars_azure(normalized: dict, deployment: dict, inventory: dict) -> dict:
     network_strategy = normalized["network"]["strategy"]
 
     if network_strategy != "isolated":
@@ -120,6 +136,36 @@ def build_tfvars_azure(normalized: dict, deployment: dict) -> dict:
     if compliance_standards:
         tfvars["compliance_standards"] = compliance_standards
 
+    # Optional: account-level network policy / shared audit-log
+    # destination to attach (CLAUDE.md §10 backlog item #1a / §8
+    # milestone 40) - same deployment-override > inventory-default >
+    # None precedence as AWS's resolve_network_policy_id(), but keyed by
+    # Azure subscription id here (azure.accounts.<name>), not by a
+    # Databricks account id - this project's Azure pipeline has never
+    # needed to track a separate Databricks account id anywhere else
+    # (Unity Catalog auto-assigns, see platform/inventory/azure.yaml's
+    # own header comment), so introducing one just for these two fields
+    # would be its own, separate piece of scope. Neither field is ever
+    # required - an unset network policy/diagnostic setting is today's
+    # behavior for every workspace.
+    azure_account_inventory = resolve_azure_account_inventory(
+        normalized["cloud"]["account"], inventory
+    )
+
+    network_policy_id = deployment.get("network_policy_id") or (
+        azure_account_inventory.get("network_policy_id")
+    )
+
+    if network_policy_id:
+        tfvars["network_policy_id"] = network_policy_id
+
+    log_analytics_workspace_id = deployment.get(
+        "log_analytics_workspace_id"
+    ) or azure_account_inventory.get("log_analytics_workspace_id")
+
+    if log_analytics_workspace_id:
+        tfvars["log_analytics_workspace_id"] = log_analytics_workspace_id
+
     return tfvars
 
 
@@ -135,8 +181,9 @@ def main_azure(args, normalized: dict, deployment_dir: Path) -> None:
     )
 
     deployment = load_yaml(deployment_path)
+    inventory = load_yaml(ROOT / "platform" / "inventory" / "azure.yaml")
 
-    tfvars = build_tfvars_azure(normalized, deployment)
+    tfvars = build_tfvars_azure(normalized, deployment, inventory)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -57,3 +57,15 @@ variable "compliance_standards" {
   type        = list(string)
   default     = []
 }
+
+variable "log_analytics_workspace_id" {
+  description = "ID of the shared Log Analytics workspace (see infrastructure/azure/account/, CLAUDE.md §10 backlog item #1a / §8 milestone 40) this workspace's audit logs should be delivered to. Null (default) creates no azurerm_monitor_diagnostic_setting at all - audit logging stays off, same as today."
+  type        = string
+  default     = null
+}
+
+variable "audit_log_categories" {
+  description = "Databricks workspace diagnostic log categories to enable when log_analytics_workspace_id is set (confirmed against Microsoft's own current reference table, not guessed - category_group shortcuts like \"allLogs\" are not confirmed supported for this resource type). Default covers the categories that map most directly to AWS's broad AUDIT_LOGS log type."
+  type        = list(string)
+  default     = ["accounts", "clusters", "dbfs", "jobs", "notebook", "secrets", "sqlPermissions", "ssh", "unityCatalog", "workspace"]
+}

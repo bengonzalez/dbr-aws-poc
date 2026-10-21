@@ -8,14 +8,17 @@ platform:
 # directly against a real Azure subscription (throwaway spike, CLAUDE.md -
 # see the Azure milestone entry): Unity Catalog auto-enables and
 # auto-assigns a region/tenant-level metastore on workspace creation, so
-# there is no AWS-style "databricks_account_id" concept to default or
-# override here at all - nothing in this pipeline ever needs one for
-# Azure. There's also no subnet_defaults/availability_zones block: Azure
-# VNet-injection subnets aren't AZ-scoped the way AWS subnets are - a
-# workspace always gets exactly two regional subnets ("public"/"private",
-# Databricks' own naming), a fixed convention baked into
-# modules/azure-workspace-network rather than an inventory-driven
-# allocation.
+# there is no AWS-style per-workspace "databricks_account_id" concept to
+# default or override here - nothing in the resolver/tfvars-generation
+# pipeline needs one for Azure. (The account-LEVEL shared-state root,
+# infrastructure/azure/account/, does need one, but it's supplied
+# directly in that root's own tfvars, not looked up from here - see
+# CLAUDE.md §10 backlog item #1a / §8 milestone 40.) There's also no
+# subnet_defaults/availability_zones block: Azure VNet-injection subnets
+# aren't AZ-scoped the way AWS subnets are - a workspace always gets
+# exactly two regional subnets ("public"/"private", Databricks' own
+# naming), a fixed convention baked into modules/azure-workspace-network
+# rather than an inventory-driven allocation.
 #
 # Scope note: only the "isolated"-equivalent strategy (always a brand-new,
 # Terraform-owned VNet) is supported today - there is no existing-VNet
@@ -29,6 +32,22 @@ azure:
       # looks this account up the same way it looks up an AWS account,
       # keyed generically by cloud.provider.
       account_id: "2539d6cd-e5b0-409e-b246-ed2b4814ef5f"
+
+      # network_policy_id / log_analytics_workspace_id (§8 milestone 40):
+      # the id of the account-level network policy / shared Log
+      # Analytics workspace created by infrastructure/azure/account/,
+      # if that root has been applied with the matching toggle on.
+      # Both keyed under this Azure-subscription entry, not under a
+      # separate Databricks-account-id section the way AWS's
+      # network_policy_id is - this project's Azure pipeline has never
+      # tracked a distinct Databricks account id anywhere else (see the
+      # header comment above), so introducing one just for these two
+      # fields would be its own, separate piece of scope. Omitted
+      # today (that root hasn't been applied yet) - resolver/
+      # generate_tfvars_azure.py never requires either.
+      # network_policy_id: "<paste output here>"
+      # log_analytics_workspace_id: "<paste output here>"
+
       regions:
         southcentralus:
           approved: true

@@ -1,13 +1,15 @@
 module "deployment" {
   source = "../../../modules/azure/workspace-deployment"
 
-  cloud                = var.cloud
-  workspace            = var.workspace
-  application          = var.application
-  ownership            = var.ownership
-  network              = var.network
-  tags                 = local.common_tags
-  compliance_standards = var.compliance_standards
+  cloud                      = var.cloud
+  workspace                  = var.workspace
+  application                = var.application
+  ownership                  = var.ownership
+  network                    = var.network
+  tags                       = local.common_tags
+  compliance_standards       = var.compliance_standards
+  log_analytics_workspace_id = var.log_analytics_workspace_id
+  audit_log_categories       = var.audit_log_categories
 }
 
 # Unity Catalog composed here, in the root, rather than inside
@@ -71,4 +73,23 @@ resource "databricks_disable_legacy_dbfs_setting" "this" {
   }
 
   depends_on = [module.deployment]
+}
+
+# Attaches this workspace to an account-level network policy (CLAUDE.md
+# §10 backlog item #1a / §8 milestone 40), when one is resolved for it.
+# Needs the account-level provider (databricks.mws, above), not the
+# workspace-scoped one everything else in this root uses -
+# databricks_workspace_network_option's own docs say it "can only be
+# used with an account-level provider." Its own docs also say it
+# "cannot be created or deleted," only updated - every workspace always
+# has exactly one network policy (default-policy unless changed), so
+# this resource just points that association at a different policy
+# once the workspace exists.
+resource "databricks_workspace_network_option" "this" {
+  count = var.network_policy_id != null ? 1 : 0
+
+  provider = databricks.mws
+
+  workspace_id      = module.deployment.workspace_id
+  network_policy_id = var.network_policy_id
 }
