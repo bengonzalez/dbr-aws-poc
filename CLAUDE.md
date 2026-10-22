@@ -135,7 +135,7 @@ requirements, security controls, Terraform behavior.
 | `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`, `validate_deployment.py`, `inventory.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `inventory.py` holds shared `platform/inventory/aws.yaml` lookups (`resolve_metastore_id()`, `find_primary_network()`, `resolve_platform_network()`, `subnet_defaults_for()`, `allocate_subnets()`, `resolve_existing_vpc_cidr()` — milestone 28; `resolve_databricks_account_id()` — milestone 29; `resolve_route_table_ids()` — milestone 30, consolidated/renamed from `route_table_ids_known()` in milestone 31; `resolve_network_policy_id()` — milestone 39, never raises, unlike the others, since an unset network policy is a valid default) — centralized here, not in `generate_tfvars.py`, specifically to avoid a circular import with `check_cidr_allocations.py`. `generate_tfvars.py` turns normalized + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/aws/<env>/<name>/` (§8 milestone 13); its metastore and VPC/route-table lookups both come from `inventory.py` (§8 milestones 23, 25); its `ensure_subnet_allocation()` (§8 milestone 28) auto-carves and permanently pins subnet CIDRs into a sibling generated `allocated-subnets.yaml` file whenever a workspace's `deployment.yaml` doesn't hand-type its own `network.subnets.private`; `main()` now resolves `databricks_account_id` once up front (deployment override > request > inventory default, §8 milestone 29) before either of those run; its `resolve_network_ownership()` (§8 milestones 9, 30) now infers `routing_ownership`/`endpoints_ownership` from whether route table ids are actually known for the VPC in play, rather than a blind per-strategy default, and `build_tfvars()` always forwards all three ownership overrides explicitly (not just when set in `deployment.yaml`) so Terraform's own `locals.tf` coalesce can't diverge from the inference. `generate_backend_config.py` turns `normalized/<provider>/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/aws/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/aws/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (§8 milestones 14, 25, 28) scans every committed `deployment.yaml` for CIDR collisions/pool violations, falling back to `inventory.py`'s lookup when a workspace's `deployment.yaml` omits `platform.vpc_id`, and (§8 milestone 28) merging in a workspace's `allocated-subnets.yaml` and the request's own `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` passthroughs when present; exposes `vpc_scope()`/`used_subnets_for_scope()` for `generate_tfvars.py`'s allocator to reuse; called automatically by `generate_tfvars.py` before (and after a first-time allocation) it writes tfvars. `validate_deployment.py` (§8 milestones 23-24, 29) checks a *deployed* workspace's live AWS/Databricks state against what was resolved for it — run manually, post-apply, not wired into anything automatically; its optional `--workspace-profile` additionally verifies live catalog isolation/storage via a workspace-scoped profile (§8 milestone 24); now resolves `databricks_account_id` the same 3-tier way as `generate_tfvars.py` instead of reading `deployment.yaml` directly (§8 milestone 29). As of §8 milestone 35, `generate_tfvars.py`'s `main()` dispatches on `normalized["cloud"]["provider"]` to either its own AWS body (extracted unchanged into `_main_aws()`) or a new sibling module `resolver/generate_tfvars_azure.py`'s `main_azure()`/`build_tfvars_azure()` — deliberately not interleaved as `if`/`else` branches inside this file's existing AWS-shaped functions, same "parallel cloud-specific code" principle as the Terraform module layer below. `resolver/main.py` and `resolver.py` themselves gained one small provider-generic change each (inventory file selection; the one AWS-hardcoded inventory block in `resolve_configuration()`) rather than a parallel file, since both were already cloud-agnostic apart from that one spot. See §5 gaps. |
 | `resolver/generate_tfvars_azure.py` | **New, §8 milestone 35** | Azure's tfvars generation - much smaller than the AWS path's `generate_tfvars.py` given the deliberately bounded scope (no subnet allocation/collision checking, no VPC/routing/SG/endpoints ownership inference, no KMS bring-your-own-key): `derive_subnet_cidrs()` carves the two fixed `/24` subnets Azure's VNet-injection model needs straight out of `network.vpc_cidr` (no AZ-scoped `subnet_defaults` inventory lookup - Azure subnets aren't AZ-scoped the way AWS's are), and `resolve_encryption_azure()` (§8 milestone 42) validates customer-managed encryption: it rejects AWS KMS fields, malformed or unused brought key ids, and customer-managed workspace keys combined with a FedRAMP compliance standard. `custom` strategy (§8 milestone 41) goes through `resolve_existing_vnet()` and `ensure_custom_subnet_allocation()` - the latter allocates two `/24`s inside the client VNet and pins them to `allocated-subnets.yaml`, AWS-milestone-28-style. |
 | `resolver/validate_deployment_azure.py` | **New, §8 milestone 43, live-verified** | Azure checks for the post-apply validation harness, dispatched from `validate_deployment.py` (which now auto-detects the provider via `loader.resolve_normalized_path()`, with an optional `--provider`). It shares that module's statuses, report, evidence and blocking logic. It authenticates through the active `az login` (no `--profile`), so the Unity Catalog catalog check always runs. Checks: workspace provisioning; VNet injection + no public IP (+ the client VNet for `custom`); all three workspace CMKs plus brought-key identity; the UC storage account's key; the metastore; catalog isolation and storage root; the compliance security profile; and centralized audit logging via the per-workspace diagnostic setting. It refuses to run if the shared root is initialized for a different workspace. |
-| `resolver/teardown.py` | **New, §8 milestone 45; Azure path live-verified, AWS path partly** | `--workspace <name> [--provider] [--yes] [--purge-files]`. Destroys one workspace, including every step a plain `terraform destroy` misses: it inits the right backend itself, `state rm`s the one-way-locked legacy settings, retries known-transient destroy failures, and on Azure deletes the orphaned Databricks-managed resource group. On AWS it stops (with manual steps) on a non-empty S3 bucket or the UC storage-credential lock rather than deleting data. `--purge-files` also removes the empty state object and the generated local files (never the request). |
+| `resolver/teardown.py` | **New, §8 milestone 45; live-verified on both clouds (AWS §8 milestone 49)** | `--workspace <name> [--provider] [--yes] [--purge-files]`. Destroys one workspace, including every step a plain `terraform destroy` misses: it inits the right backend itself, `state rm`s the one-way-locked legacy settings, retries known-transient destroy failures, and on Azure deletes the orphaned Databricks-managed resource group. On AWS it stops (with manual steps) on a non-empty S3 bucket or the UC storage-credential lock rather than deleting data. `--purge-files` also removes the empty state object and the generated local files (never the request). |
 | `ci/pipeline.py`, `.gitlab-ci.yml`, `Jenkinsfile`, `ci/README.md` | **New, §8 milestone 48; driver live-verified locally, wrappers not yet run in a real GitLab/Jenkins** | CI for both client toolchains: GitLab for AWS, Jenkins for Azure. `ci/pipeline.py` holds every real step (`changed`/`prepare`/`verify`/`plan`/`apply`). The two wrappers only handle triggers on `workspace-requests/<cloud>/**`, workload identity federation, the manual approval gate and artifacts. `ci/README.md` is the one-time identity setup for each. |
 | `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. `workspace-request.schema.json` gained optional `network.connectivity` (§8 milestone 27); `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` (§8 milestone 28); and, §8 milestone 29, `network.existing_security_group_id`, a new top-level `encryption` object (`existing_workspace_storage_key_arn`/`_alias`, `existing_managed_services_key_arn`/`_alias` — the first requester-controlled `encryption` fields; `encryption.workspace`/`application_data` stay entirely profile-derived), `governance.existing_metastore_id` (alongside the milestone-22 `catalog_admin_principal` — the first two requester-controlled `governance` fields), and `cloud.databricks_account_id`. All mirrored into `normalized-config.schema.json` too. The latter's now-dead `network.requirements.subnets.allocation` sub-schema (count/AZs/cidr_source — superseded by real auto-allocation, §8 milestone 28) was removed. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. As of §8 milestone 35, `cloud.provider`'s enum gained `"azure"` (both schemas) and `normalized-config.schema.json`'s `cloud.account` pattern was relaxed to accept either a 12-digit AWS account id or a UUID-shaped Azure subscription id - no other schema change was needed since `network.vpc_cidr`/`governance.catalog_admin_principal`/etc. were already cloud-agnostic strings with no AWS-specific pattern. |
 | `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely — `policies/network.yaml`'s `allowed_strategies` is now the only thing with an opinion on network strategy per environment (§8 milestone 16). |
@@ -237,10 +237,9 @@ is to set `endpoints_ownership_override = "terraform"` for dev specifically
   seconds to minutes later. Looks like IAM trust-policy propagation lag on
   AWS's side, not a real misconfiguration — the role/policy content was
   verified correct via `aws iam get-role`/`get-role-policy` both times.
-  **Not yet fixed systemically** — worth adding a short `time_sleep`
-  between the IAM role/policy and `databricks_mws_credentials` (matching the
-  pattern SRA itself uses elsewhere for exactly this kind of propagation
-  gap) so future workspace creation doesn't need a manual retry.
+  **Fixed systemically in §8 milestone 49**: a 30s `time_sleep` keyed on
+  the role ARN now sits between the IAM role and
+  `databricks_mws_credentials`.
 - **All three test workspaces destroyed on 2026-10-13** (user's call, clean
   `terraform destroy` for `document-ai-dev`, `isolated-proof`, and
   `client-vpc-proof` — confirmed via AWS/Databricks: their VPCs, S3 root
@@ -3978,9 +3977,10 @@ Priority order agreed on:
       `network_policy_id` output, and the plan is now **No changes**
       (`-detailed-exitcode` 0). The milestone-44 ingress fix wasn't
       exercised on AWS, since the tier check fires first.
-    - **First delivery not yet observed** at the time of writing: the
-      configuration reports `CREATED` ("updated after the first delivery
-      attempt") and the bucket is still empty. Databricks delivers audit
+    - **First delivery confirmed later the same day** (`SUCCEEDED`, files
+      under `audit-logs/`; see milestone 49). At the time of writing, the
+      configuration reported `CREATED` ("updated after the first delivery
+      attempt") and the bucket was still empty. Databricks delivers audit
       logs periodically, so check `aws s3 ls
       s3://databricks-platform-audit-log-delivery/audit-logs/
       --recursive` later.
@@ -4057,6 +4057,59 @@ Priority order agreed on:
     - **Not verified, flagged in `ci/README.md` and §10 #14**: the
       wrappers in a real GitLab/Jenkins (YAML parse-checked only), and
       `env-oidc` against the AWS **account** host.
+
+49. **AWS logging check + AWS end-to-end refresh** (2026-10-22). After
+    CI was tabled, the user picked this: make the AWS validator's
+    `logging.centralized` real, then redeploy, validate and tear down one
+    AWS workspace with the current code.
+    - **`logging.centralized` on AWS is now a real check**, not
+      `NOT_IMPLEMENTED` (the stale message noted in milestone 43). AWS
+      audit delivery is account-level (milestones 39/47), so
+      `resolver/validate_deployment.py`'s `check_centralized_logging()`
+      runs `databricks account log-delivery list` and requires an
+      `ENABLED` `AUDIT_LOGS` config. If that config has a
+      `workspace_ids_filter`, it must include this workspace. Its last
+      delivery must not have failed: `SUCCEEDED`, `CREATED` (no attempt
+      yet) and `NOT_FOUND` pass. It runs in the not-deployed path too, since
+      the account config exists regardless. `N/A` when
+      `logging.centralized` is false.
+    - **IAM propagation fix (closes §4a's oldest TODO)**: the first apply
+      hit the usual "Failed credential validation checks" on
+      `databricks_mws_credentials`. `modules/aws/workspace-deployment` now
+      has a 30s `time_sleep` keyed on the cross-account role ARN; the
+      credential reads the ARN through the sleep's `triggers`, so a role
+      change re-waits. The retry passed it with no manual step.
+    - **The milestone-36 orphan again**: the external location
+      `isolated-proof-uc-external-location` survived the previous
+      teardown, bound to an old workspace. `terraform import` failed the
+      same way as before ("received HTML response instead of JSON"). The
+      same fix worked:
+      1. a workspace-scoped login under a **new** profile name
+         (`isolated-proof-ws-aws3`);
+      2. `databricks workspace-bindings update-bindings
+         external-location ...` to add the new workspace;
+      3. `databricks external-locations delete ... --force`;
+      4. re-plan (5 to add) and apply.
+      The `TSA` account login's refresh token had also expired and needed
+      `databricks auth login --profile TSA`.
+      **Not yet prevented.** Why the location survived destroy (with
+      `force_destroy` set since milestone 46) is unknown. Next time, check
+      before teardown whether it's still in state.
+    - **Deployed through `ci/pipeline.py plan`/`apply`** (`TSA`), so the
+      validator ran automatically: **5 PASS** (with
+      `--workspace-profile`), 1 N/A, 1 NOT_IMPLEMENTED; `logging.centralized`
+      PASS (`'databricks-platform-audit-logs': last delivery SUCCEEDED`).
+      Follow-up plan: **No changes**.
+    - **First live AWS run of `resolver/teardown.py`** (`--yes`, no
+      `--purge-files`, since `isolated-proof` is a tracked workspace):
+      57 entries, 2 locked settings `state rm`'d, and destroy needed all
+      **3 attempts** (two known-transient retries, then 19 destroyed).
+      Exit 0, state empty, no NAT Gateway left, workspace
+      `RESOURCE_DOES_NOT_EXIST`. The wrapper didn't print *which* error
+      it retried on; it now logs the matching line. It was most likely
+      milestone 36's "still attached to a workspace". The S3 and
+      storage-credential stop branches weren't hit (empty buckets, no
+      lock).
 
 ## 9. Conventions observed (keep consistent)
 

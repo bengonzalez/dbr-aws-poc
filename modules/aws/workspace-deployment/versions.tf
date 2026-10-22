@@ -4,6 +4,10 @@ terraform {
       source = "hashicorp/aws"
     }
 
+    time = {
+      source = "hashicorp/time"
+    }
+
     databricks = {
       source = "databricks/databricks"
 

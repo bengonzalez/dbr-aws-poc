@@ -93,11 +93,27 @@ resource "databricks_mws_networks" "workspace" {
   ]
 }
 
+# IAM propagation lag: Databricks validates the cross-account role the
+# moment the credential is created, and a role/policy created seconds
+# earlier routinely fails with "Failed credential validation checks", then
+# passes on a plain retry. Hit on nearly every first-time AWS apply (CLAUDE.md
+# §4a) until this sleep, the same fix as unity-catalog-data's
+# time_sleep (§8 milestone 49).
+resource "time_sleep" "cross_account_role_propagation" {
+  create_duration = "30s"
+
+  triggers = {
+    role_arn = module.workspace_iam_role.role_arn
+  }
+
+  depends_on = [module.workspace_iam_role]
+}
+
 resource "databricks_mws_credentials" "workspace" {
   provider = databricks.mws
 
   credentials_name = "${local.workspace_name}-credentials"
-  role_arn         = module.workspace_iam_role.role_arn
+  role_arn         = time_sleep.cross_account_role_propagation.triggers["role_arn"]
 
   depends_on = [
     module.workspace_iam_role

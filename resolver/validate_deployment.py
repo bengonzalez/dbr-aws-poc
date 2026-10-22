@@ -182,7 +182,8 @@ def run_checks(
                 )
             )
 
-        results.extend(_not_implemented_checks())
+        results.append(_identity_check())
+        results.append(check_centralized_logging(normalized, profile, None))
 
         return results
 
@@ -303,7 +304,8 @@ def run_checks(
             )
         )
 
-    results.extend(_not_implemented_checks())
+    results.append(_identity_check())
+    results.append(check_centralized_logging(normalized, profile, workspace_id))
 
     return results
 
@@ -383,21 +385,79 @@ def check_catalog_contents(
     )
 
 
-def _not_implemented_checks() -> list[CheckResult]:
-    return [
-        CheckResult(
-            "identity.required",
-            NOT_IMPLEMENTED,
-            "no SCIM/user/group provisioning exists anywhere in this "
-            "pipeline yet",
-        ),
-        CheckResult(
-            "logging.centralized",
-            NOT_IMPLEMENTED,
-            "no audit-log-delivery Terraform resource exists anywhere in "
-            "this pipeline yet",
-        ),
+def _identity_check() -> CheckResult:
+    return CheckResult(
+        "identity.required",
+        NOT_IMPLEMENTED,
+        "no SCIM/user/group provisioning exists anywhere in this "
+        "pipeline yet",
+    )
+
+
+# Delivery states that mean "configured, but nothing has failed": CREATED
+# is a brand-new config before its first attempt; NOT_FOUND is a config
+# Databricks has no logs for yet.
+LOG_DELIVERY_OK_STATES = ("SUCCEEDED", "CREATED", "NOT_FOUND")
+
+
+def check_centralized_logging(
+    normalized: dict, profile: str | None, workspace_id
+) -> CheckResult:
+    """
+    AWS audit logging is account-level (CLAUDE.md §8 milestones 39/47):
+    infrastructure/aws/account/ creates one databricks_mws_log_delivery
+    for the whole Databricks account. So this checks that the account has
+    an ENABLED AUDIT_LOGS delivery whose last attempt didn't fail, and,
+    if that config is filtered to specific workspaces, that this one is
+    included.
+    """
+
+    if not normalized["logging"]["centralized"]:
+        return CheckResult("logging.centralized", NOT_APPLICABLE, "logging.centralized is false")
+
+    configs, error = run_databricks(["account", "log-delivery", "list"], profile)
+
+    if configs is None:
+        return CheckResult("logging.centralized", FAIL, f"Could not list log delivery configs: {error}")
+
+    audit = [
+        c for c in configs
+        if c.get("log_type") == "AUDIT_LOGS" and c.get("status") == "ENABLED"
     ]
+
+    if not audit:
+        return CheckResult(
+            "logging.centralized",
+            FAIL,
+            "no ENABLED AUDIT_LOGS delivery on this Databricks account - "
+            "apply infrastructure/aws/account/ with enable_audit_log_delivery",
+        )
+
+    covering = [
+        c for c in audit
+        if not c.get("workspace_ids_filter")
+        or (workspace_id is not None and int(workspace_id) in [int(w) for w in c["workspace_ids_filter"]])
+    ]
+
+    if not covering:
+        return CheckResult(
+            "logging.centralized",
+            FAIL,
+            f"AUDIT_LOGS delivery exists but its workspace filter excludes workspace {workspace_id}",
+        )
+
+    config = covering[0]
+    delivery = config.get("log_delivery_status") or {}
+    state = delivery.get("status")
+    detail = (
+        f"{config.get('config_name')!r}: last delivery {state}"
+        + (f" at {delivery.get('last_successful_attempt_time')}" if delivery.get("last_successful_attempt_time") else "")
+    )
+
+    if state not in LOG_DELIVERY_OK_STATES:
+        return CheckResult("logging.centralized", FAIL, f"{detail} - {delivery.get('message')}")
+
+    return CheckResult("logging.centralized", PASS, detail)
 
 
 def print_report(results: list[CheckResult]) -> None:

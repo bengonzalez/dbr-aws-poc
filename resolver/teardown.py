@@ -212,8 +212,13 @@ def destroy(root: Path, var_file: str, provider: str) -> None:
         if provider == "aws":
             check_aws_hazards(output)
 
-        if attempt < MAX_DESTROY_ATTEMPTS and any(re.search(p, output, re.I) for p in TRANSIENT_PATTERNS):
-            log("known transient failure - retrying")
+        transient = [
+            line.strip() for line in output.splitlines()
+            if any(re.search(p, line, re.I) for p in TRANSIENT_PATTERNS)
+        ]
+
+        if attempt < MAX_DESTROY_ATTEMPTS and transient:
+            log(f"known transient failure - retrying: {transient[0]}")
             continue
 
         errors = "\n".join(line for line in output.splitlines() if "Error" in line) or output[-2000:]
