@@ -5,8 +5,9 @@ variable "databricks_account_id" {
 }
 
 variable "databricks_profile" {
-  description = "Databricks CLI authentication profile used for account-level Terraform operations."
+  description = "Databricks CLI authentication profile used for account-level Terraform operations. Null in CI, where auth comes from DATABRICKS_* environment variables (workload identity federation - see ci/README.md)."
   type        = string
+  default     = null
 }
 
 variable "workspace" {

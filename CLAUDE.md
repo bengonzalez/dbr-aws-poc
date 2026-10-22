@@ -136,6 +136,7 @@ requirements, security controls, Terraform behavior.
 | `resolver/generate_tfvars_azure.py` | **New, §8 milestone 35** | Azure's tfvars generation - much smaller than the AWS path's `generate_tfvars.py` given the deliberately bounded scope (no subnet allocation/collision checking, no VPC/routing/SG/endpoints ownership inference, no KMS bring-your-own-key): `derive_subnet_cidrs()` carves the two fixed `/24` subnets Azure's VNet-injection model needs straight out of `network.vpc_cidr` (no AZ-scoped `subnet_defaults` inventory lookup - Azure subnets aren't AZ-scoped the way AWS's are), and `resolve_encryption_azure()` (§8 milestone 42) validates customer-managed encryption: it rejects AWS KMS fields, malformed or unused brought key ids, and customer-managed workspace keys combined with a FedRAMP compliance standard. `custom` strategy (§8 milestone 41) goes through `resolve_existing_vnet()` and `ensure_custom_subnet_allocation()` - the latter allocates two `/24`s inside the client VNet and pins them to `allocated-subnets.yaml`, AWS-milestone-28-style. |
 | `resolver/validate_deployment_azure.py` | **New, §8 milestone 43, live-verified** | Azure checks for the post-apply validation harness, dispatched from `validate_deployment.py` (which now auto-detects the provider via `loader.resolve_normalized_path()`, with an optional `--provider`). It shares that module's statuses, report, evidence and blocking logic. It authenticates through the active `az login` (no `--profile`), so the Unity Catalog catalog check always runs. Checks: workspace provisioning; VNet injection + no public IP (+ the client VNet for `custom`); all three workspace CMKs plus brought-key identity; the UC storage account's key; the metastore; catalog isolation and storage root; the compliance security profile; and centralized audit logging via the per-workspace diagnostic setting. It refuses to run if the shared root is initialized for a different workspace. |
 | `resolver/teardown.py` | **New, §8 milestone 45; Azure path live-verified, AWS path partly** | `--workspace <name> [--provider] [--yes] [--purge-files]`. Destroys one workspace, including every step a plain `terraform destroy` misses: it inits the right backend itself, `state rm`s the one-way-locked legacy settings, retries known-transient destroy failures, and on Azure deletes the orphaned Databricks-managed resource group. On AWS it stops (with manual steps) on a non-empty S3 bucket or the UC storage-credential lock rather than deleting data. `--purge-files` also removes the empty state object and the generated local files (never the request). |
+| `ci/pipeline.py`, `.gitlab-ci.yml`, `Jenkinsfile`, `ci/README.md` | **New, §8 milestone 48; driver live-verified locally, wrappers not yet run in a real GitLab/Jenkins** | CI for both client toolchains: GitLab for AWS, Jenkins for Azure. `ci/pipeline.py` holds every real step (`changed`/`prepare`/`verify`/`plan`/`apply`). The two wrappers only handle triggers on `workspace-requests/<cloud>/**`, workload identity federation, the manual approval gate and artifacts. `ci/README.md` is the one-time identity setup for each. |
 | `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. `workspace-request.schema.json` gained optional `network.connectivity` (§8 milestone 27); `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` (§8 milestone 28); and, §8 milestone 29, `network.existing_security_group_id`, a new top-level `encryption` object (`existing_workspace_storage_key_arn`/`_alias`, `existing_managed_services_key_arn`/`_alias` — the first requester-controlled `encryption` fields; `encryption.workspace`/`application_data` stay entirely profile-derived), `governance.existing_metastore_id` (alongside the milestone-22 `catalog_admin_principal` — the first two requester-controlled `governance` fields), and `cloud.databricks_account_id`. All mirrored into `normalized-config.schema.json` too. The latter's now-dead `network.requirements.subnets.allocation` sub-schema (count/AZs/cidr_source — superseded by real auto-allocation, §8 milestone 28) was removed. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. As of §8 milestone 35, `cloud.provider`'s enum gained `"azure"` (both schemas) and `normalized-config.schema.json`'s `cloud.account` pattern was relaxed to accept either a 12-digit AWS account id or a UUID-shaped Azure subscription id - no other schema change was needed since `network.vpc_cidr`/`governance.catalog_admin_principal`/etc. were already cloud-agnostic strings with no AWS-specific pattern. |
 | `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely — `policies/network.yaml`'s `allowed_strategies` is now the only thing with an opinion on network strategy per environment (§8 milestone 16). |
 | `policies/policies.yaml` | Working | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping + per-environment `allowed_strategies`, validation blocking per env), one key per domain (`network_policy`, `security_policy`, `data_policy`, `governance_policy`, `validation_policy`). Trimmed to only the fields `resolver.py` actually reads (§8 milestone 15), gained `network_policy.allowed_strategies` (§8 milestone 16), then merged from five separate files into this one 2026-10-14 (§8 milestone 18 — closes §5.13's config-layer complexity review). |
@@ -3989,6 +3990,74 @@ Priority order agreed on:
       `resolver/teardown.py` is per-workspace and doesn't cover account
       roots.
 
+48. **CI pipelines: GitLab (AWS) and Jenkins (Azure) over one shared
+    driver** (2026-10-22). The client runs GitLab for AWS and Jenkins for
+    Azure, with **manual approval for every apply** and **workload
+    identity federation** (user's requirements). Builds trigger on
+    changes to `workspace-requests/**`.
+    - **Decisions (user, via AskUserQuestion)**:
+      - **Generated files are committed in the merge request and CI
+        verifies them**, so reviewers see the resolved config (CIDRs,
+        keys, flags) and CI never needs push rights.
+      - **Deleted requests only fail the run**: CI never tears down;
+        `resolver/teardown.py` stays a deliberate operator action.
+    - **`ci/pipeline.py`** (CI-agnostic, runs locally). Every
+      workspace-scoped subcommand takes the request **path**, which
+      carries cloud, environment and name, so there's no cross-cloud
+      name ambiguity.
+      - `changed`: `git diff --name-status` vs. a base ref for
+        `workspace-requests/<cloud>/`; ignores `TEMPLATE.yaml`; exits 3
+        on deletions.
+      - `prepare` (local): `resolver/main.py`, a stub `deployment.yaml`
+        if missing, `generate_tfvars.py`, `generate_backend_config.py`.
+      - `verify` (CI): the same generation, using the account from the
+        committed normalized config, then fails on any `git status`
+        change and prints the diff and the exact `prepare` command.
+      - `plan`: checks the job's live cloud identity (`aws sts
+        get-caller-identity` / `az account show`) **matches the
+        request's resolved account** and refuses otherwise; two-file
+        `init`; `plan -detailed-exitcode -out`; a readable copy.
+      - `apply`: applies **exactly the saved plan**, then runs the
+        validator. On AWS in CI it sets the account host + account id
+        for the validator's account-level calls.
+    - **Wrappers**:
+      - `.gitlab-ci.yml`: `id_tokens` for AWS (`sts.amazonaws.com`, via
+        `AWS_ROLE_ARN` + `AWS_WEB_IDENTITY_TOKEN_FILE`, read natively by
+        Terraform, the S3 backend and the aws CLI) and Databricks
+        (`env-oidc`, audience = account id). The apply job is `when:
+        manual` on the default branch, with protected environment
+        `aws-workspaces` and a `resource_group` to serialize applies.
+      - `Jenkinsfile` (multibranch): OIDC Provider plugin id-token
+        credential (audience `api://AzureADTokenExchange`), feeding
+        `ARM_USE_OIDC`/`ARM_OIDC_TOKEN` for azurerm/azuread/backend, plus
+        `az login --federated-token` for the az CLI, the `azure-cli`
+        Databricks provider and the validator. Then an `input` approval
+        restricted to `APPROVERS`, `stash`/`unstash` of the plans and a
+        fresh token binding for the apply.
+    - **Supporting changes**:
+      - The AWS root's `databricks_profile` is now optional; with it
+        null, `auth_type` is null and the provider reads `DATABRICKS_*`
+        from the environment (local runs with `TSA` are unchanged).
+      - `validate_deployment.py` accepts no `--profile` when
+        `DATABRICKS_AUTH_TYPE` is set.
+    - **Verified locally** (not yet inside a real GitLab or Jenkins):
+      - `changed` found real history, including a real deletion (the
+        old `azure-isolated-proof.yaml` rename), exit 3.
+      - `verify` passed for all six committed workspaces; a request edit
+        without regenerating failed with the diff and fix command.
+      - `plan` on the live Azure `isolated-proof`: No changes; on AWS
+        `isolated-proof` (TSA, destroyed): 47 to add. An identity
+        mismatch was refused.
+      - **The full create path ran through the driver** on a throwaway
+        local branch: new Azure dev request → `prepare` → commit →
+        `changed --base main` → `verify` → `plan` (21) → `apply` →
+        validation **PASSED**. Re-applying the same plan file was
+        rejected ("Saved plan is stale"). Torn down with `teardown.py`;
+        the branch was deleted and never pushed.
+    - **Not verified, flagged in `ci/README.md` and §10 #14**: the
+      wrappers in a real GitLab/Jenkins (YAML parse-checked only), and
+      `env-oidc` against the AWS **account** host.
+
 ## 9. Conventions observed (keep consistent)
 
 - Every top-level cloud-specific location is grouped under a `<cloud>/`
@@ -4044,6 +4113,11 @@ Priority order agreed on:
   (`modules/azure/workspace-network`'s `existing_vnet_id`/
   `existing_*_subnet_id`, §8 milestone 41), but without the
   ownership-override layer — on Azure the strategy alone decides.
+- **Requests go through `ci/pipeline.py prepare`** (§8 milestone 48):
+  after adding or editing a request, run `python ci/pipeline.py prepare
+  --request <path> --account <id>` and commit the generated files with
+  it. CI's `verify` fails any merge request whose committed files don't
+  match. The manual steps below are what `prepare` runs.
 - **Standing up a new AWS workspace end-to-end** (current convention, §8
   milestones 13/35): write `workspace-requests/aws/<env>/<name>.yaml` → run
   `resolver/main.py --request ... --account ...` → write
@@ -4209,3 +4283,10 @@ deleting it silently.
 13. **Azure Private Link with adopted subnets** (deferred from milestone
     46). Rejected today with a clear error; would need a brought
     private-endpoint subnet id alongside `existing_subnet_ids`.
+14. **CI follow-ups** (deferred from milestone 48):
+    - run both wrappers in a real GitLab and Jenkins;
+    - confirm Databricks `env-oidc` works against the AWS **account**
+      host (Databricks only documents workspace hosts);
+    - teardown from CI for deleted requests;
+    - one job per workspace (dynamic child pipelines / parallel stages);
+    - a shared pipeline image.

@@ -41,6 +41,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 import argparse
 import json
+import os
 import subprocess
 
 from loader import load_yaml, resolve_normalized_path
@@ -66,12 +67,14 @@ class CheckResult:
         return {"name": self.name, "status": self.status, "detail": self.detail}
 
 
-def run_databricks(args: list[str], profile: str) -> tuple[dict | None, str | None]:
+def run_databricks(args: list[str], profile: str | None) -> tuple[dict | None, str | None]:
     """Run a databricks CLI command. Returns (parsed_json, None) on success,
     or (None, error_message) on failure - never raises, so callers can
-    turn a CLI failure into a FAIL check result instead of crashing."""
+    turn a CLI failure into a FAIL check result instead of crashing.
+    profile None means auth comes from DATABRICKS_* environment variables
+    (CI, workload identity federation)."""
 
-    command = ["databricks"] + args + ["--profile", profile, "-o", "json"]
+    command = ["databricks"] + args + (["--profile", profile] if profile else []) + ["-o", "json"]
 
     try:
         result = subprocess.run(command, capture_output=True, text=True, check=False)
@@ -521,8 +524,12 @@ def main() -> int:
 
         return _report(args.workspace, normalized, run_checks_azure(normalized, deployment, inventory))
 
-    if not args.profile:
-        raise RuntimeError("--profile (a Databricks account-console CLI profile) is required for AWS workspaces.")
+    if not args.profile and not os.environ.get("DATABRICKS_AUTH_TYPE"):
+        raise RuntimeError(
+            "AWS workspaces need --profile (a Databricks account-console CLI "
+            "profile), or DATABRICKS_AUTH_TYPE + DATABRICKS_HOST/ACCOUNT_ID "
+            "in the environment (CI)."
+        )
 
     databricks_account_id = resolve_databricks_account_id(
         normalized["cloud"]["account"],

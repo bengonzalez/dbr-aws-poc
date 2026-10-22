@@ -1,0 +1,114 @@
+# AWS workspace pipeline (GitLab CI). A thin wrapper: every real step lives
+# in ci/pipeline.py, shared with the Jenkins (Azure) pipeline. One-time
+# identity setup and the full list of prerequisites: ci/README.md.
+#
+# Flow: merge requests touching workspace-requests/aws/** get detect +
+# verify + plan; the default branch additionally gets a manual apply
+# (protected environment) that applies exactly the plan from its own
+# pipeline, then validates the workspace.
+#
+# Required CI/CD variables:
+#   PIPELINE_IMAGE          image with python3/pip, terraform, aws CLI, databricks CLI
+#   AWS_ROLE_ARN            IAM role whose trust policy accepts this project's
+#                           GitLab OIDC tokens (aud sts.amazonaws.com)
+#   DATABRICKS_CLIENT_ID    Databricks service principal application id, with a
+#                           federation policy for this project
+#   DATABRICKS_ACCOUNT_ID   Databricks account id - also the Databricks token audience
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - workspace-requests/aws/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - workspace-requests/aws/**/*
+
+default:
+  image: $PIPELINE_IMAGE
+
+variables:
+  GIT_DEPTH: "0" # `changed` diffs against the merge-request base / previous commit
+  TF_IN_AUTOMATION: "true"
+  PLAN_DIR: plans
+
+stages:
+  - detect
+  - plan
+  - apply
+
+# Workload identity federation - no stored cloud or Databricks secrets.
+# AWS: the Terraform AWS provider, the S3 backend and the aws CLI all read
+# AWS_ROLE_ARN + AWS_WEB_IDENTITY_TOKEN_FILE natively. Databricks: env-oidc
+# exchanges DATABRICKS_OIDC_TOKEN for a Databricks OAuth token as
+# DATABRICKS_CLIENT_ID. Tokens are minted per job, so the apply job (run
+# after approval, possibly much later) gets fresh ones.
+.identity:
+  id_tokens:
+    AWS_OIDC_TOKEN:
+      aud: sts.amazonaws.com
+    DATABRICKS_OIDC_TOKEN:
+      aud: $DATABRICKS_ACCOUNT_ID
+  variables:
+    DATABRICKS_AUTH_TYPE: env-oidc
+  before_script:
+    - python3 -m pip install --quiet -r requirements.txt
+    - printf '%s' "$AWS_OIDC_TOKEN" > "$CI_PROJECT_DIR/.aws-web-identity-token"
+    - export AWS_WEB_IDENTITY_TOKEN_FILE="$CI_PROJECT_DIR/.aws-web-identity-token"
+    - export AWS_ROLE_SESSION_NAME="gitlab-${CI_PROJECT_ID}-${CI_PIPELINE_ID}"
+
+detect:
+  stage: detect
+  before_script:
+    - python3 -m pip install --quiet -r requirements.txt
+  script:
+    - BASE="${CI_MERGE_REQUEST_DIFF_BASE_SHA:-$CI_COMMIT_BEFORE_SHA}"
+    # A brand-new branch's first push has no "before" commit.
+    - if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then BASE="HEAD~1"; fi
+    # Exits 3 (failing the pipeline) if a request was deleted - CI never
+    # tears a workspace down.
+    - python3 ci/pipeline.py changed --cloud aws --base "$BASE" --output changed.json
+  artifacts:
+    paths:
+      - changed.json
+    expire_in: 30 days
+
+plan:
+  stage: plan
+  extends: .identity
+  needs: [detect]
+  script:
+    - REQUESTS=$(python3 -c "import json; print(' '.join(json.load(open('changed.json'))['changed']))")
+    - if [ -z "$REQUESTS" ]; then echo "No AWS request changes."; exit 0; fi
+    - |
+      for request in $REQUESTS; do
+        python3 ci/pipeline.py verify --request "$request"
+        python3 ci/pipeline.py plan --request "$request" --out-dir "$PLAN_DIR"
+      done
+  artifacts:
+    paths:
+      - plans/
+      - changed.json
+    expire_in: 30 days
+
+apply:
+  stage: apply
+  extends: .identity
+  needs: [detect, plan]
+  rules:
+    # Manual, default branch only. Pair with a protected environment that
+    # requires deployment approval (Settings > CI/CD > Protected
+    # environments) so only approvers can run it.
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+  allow_failure: false
+  environment:
+    name: aws-workspaces
+  resource_group: aws-workspaces # one apply at a time
+  script:
+    - REQUESTS=$(python3 -c "import json; print(' '.join(json.load(open('changed.json'))['changed']))")
+    - if [ -z "$REQUESTS" ]; then echo "Nothing to apply."; exit 0; fi
+    - |
+      for request in $REQUESTS; do
+        python3 ci/pipeline.py apply --request "$request" --plan-dir "$PLAN_DIR"
+      done
