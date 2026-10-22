@@ -135,6 +135,7 @@ requirements, security controls, Terraform behavior.
 | `resolver/` (`main.py`, `resolver.py`, `loader.py`, `validator.py`, `generate_tfvars.py`, `generate_backend_config.py`, `check_cidr_allocations.py`, `validate_deployment.py`, `inventory.py`) | Working, has gaps | Resolves request+profile+policies+inventory → normalized YAML. `inventory.py` holds shared `platform/inventory/aws.yaml` lookups (`resolve_metastore_id()`, `find_primary_network()`, `resolve_platform_network()`, `subnet_defaults_for()`, `allocate_subnets()`, `resolve_existing_vpc_cidr()` — milestone 28; `resolve_databricks_account_id()` — milestone 29; `resolve_route_table_ids()` — milestone 30, consolidated/renamed from `route_table_ids_known()` in milestone 31; `resolve_network_policy_id()` — milestone 39, never raises, unlike the others, since an unset network policy is a valid default) — centralized here, not in `generate_tfvars.py`, specifically to avoid a circular import with `check_cidr_allocations.py`. `generate_tfvars.py` turns normalized + a small per-workspace deployment file into `terraform.tfvars.json`, both now under `infrastructure/deployments/aws/<env>/<name>/` (§8 milestone 13); its metastore and VPC/route-table lookups both come from `inventory.py` (§8 milestones 23, 25); its `ensure_subnet_allocation()` (§8 milestone 28) auto-carves and permanently pins subnet CIDRs into a sibling generated `allocated-subnets.yaml` file whenever a workspace's `deployment.yaml` doesn't hand-type its own `network.subnets.private`; `main()` now resolves `databricks_account_id` once up front (deployment override > request > inventory default, §8 milestone 29) before either of those run; its `resolve_network_ownership()` (§8 milestones 9, 30) now infers `routing_ownership`/`endpoints_ownership` from whether route table ids are actually known for the VPC in play, rather than a blind per-strategy default, and `build_tfvars()` always forwards all three ownership overrides explicitly (not just when set in `deployment.yaml`) so Terraform's own `locals.tf` coalesce can't diverge from the inference. `generate_backend_config.py` turns `normalized/<provider>/<name>.yaml`'s `workspace.environment` + a workspace name into two files: `infrastructure/deployments/aws/<env>/<name>/backend.tfbackend` (just the `key` line) and `infrastructure/aws/workspace/backend.tfbackend` (bucket/region/use_lockfile, identical for every workspace, idempotently rewritten each run — §8 milestone 13). `check_cidr_allocations.py` (§8 milestones 14, 25, 28) scans every committed `deployment.yaml` for CIDR collisions/pool violations, falling back to `inventory.py`'s lookup when a workspace's `deployment.yaml` omits `platform.vpc_id`, and (§8 milestone 28) merging in a workspace's `allocated-subnets.yaml` and the request's own `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` passthroughs when present; exposes `vpc_scope()`/`used_subnets_for_scope()` for `generate_tfvars.py`'s allocator to reuse; called automatically by `generate_tfvars.py` before (and after a first-time allocation) it writes tfvars. `validate_deployment.py` (§8 milestones 23-24, 29) checks a *deployed* workspace's live AWS/Databricks state against what was resolved for it — run manually, post-apply, not wired into anything automatically; its optional `--workspace-profile` additionally verifies live catalog isolation/storage via a workspace-scoped profile (§8 milestone 24); now resolves `databricks_account_id` the same 3-tier way as `generate_tfvars.py` instead of reading `deployment.yaml` directly (§8 milestone 29). As of §8 milestone 35, `generate_tfvars.py`'s `main()` dispatches on `normalized["cloud"]["provider"]` to either its own AWS body (extracted unchanged into `_main_aws()`) or a new sibling module `resolver/generate_tfvars_azure.py`'s `main_azure()`/`build_tfvars_azure()` — deliberately not interleaved as `if`/`else` branches inside this file's existing AWS-shaped functions, same "parallel cloud-specific code" principle as the Terraform module layer below. `resolver/main.py` and `resolver.py` themselves gained one small provider-generic change each (inventory file selection; the one AWS-hardcoded inventory block in `resolve_configuration()`) rather than a parallel file, since both were already cloud-agnostic apart from that one spot. See §5 gaps. |
 | `resolver/generate_tfvars_azure.py` | **New, §8 milestone 35** | Azure's tfvars generation - much smaller than the AWS path's `generate_tfvars.py` given the deliberately bounded scope (no subnet allocation/collision checking, no VPC/routing/SG/endpoints ownership inference, no KMS bring-your-own-key): `derive_subnet_cidrs()` carves the two fixed `/24` subnets Azure's VNet-injection model needs straight out of `network.vpc_cidr` (no AZ-scoped `subnet_defaults` inventory lookup - Azure subnets aren't AZ-scoped the way AWS's are), and `resolve_encryption_azure()` (§8 milestone 42) validates customer-managed encryption: it rejects AWS KMS fields, malformed or unused brought key ids, and customer-managed workspace keys combined with a FedRAMP compliance standard. `custom` strategy (§8 milestone 41) goes through `resolve_existing_vnet()` and `ensure_custom_subnet_allocation()` - the latter allocates two `/24`s inside the client VNet and pins them to `allocated-subnets.yaml`, AWS-milestone-28-style. |
 | `resolver/validate_deployment_azure.py` | **New, §8 milestone 43, live-verified** | Azure checks for the post-apply validation harness, dispatched from `validate_deployment.py` (which now auto-detects the provider via `loader.resolve_normalized_path()`, with an optional `--provider`). It shares that module's statuses, report, evidence and blocking logic. It authenticates through the active `az login` (no `--profile`), so the Unity Catalog catalog check always runs. Checks: workspace provisioning; VNet injection + no public IP (+ the client VNet for `custom`); all three workspace CMKs plus brought-key identity; the UC storage account's key; the metastore; catalog isolation and storage root; the compliance security profile; and centralized audit logging via the per-workspace diagnostic setting. It refuses to run if the shared root is initialized for a different workspace. |
+| `resolver/teardown.py` | **New, §8 milestone 45; Azure path live-verified, AWS path partly** | `--workspace <name> [--provider] [--yes] [--purge-files]`. Destroys one workspace, including every step a plain `terraform destroy` misses: it inits the right backend itself, `state rm`s the one-way-locked legacy settings, retries known-transient destroy failures, and on Azure deletes the orphaned Databricks-managed resource group. On AWS it stops (with manual steps) on a non-empty S3 bucket or the UC storage-credential lock rather than deleting data. `--purge-files` also removes the empty state object and the generated local files (never the request). |
 | `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. `workspace-request.schema.json` gained optional `network.connectivity` (§8 milestone 27); `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` (§8 milestone 28); and, §8 milestone 29, `network.existing_security_group_id`, a new top-level `encryption` object (`existing_workspace_storage_key_arn`/`_alias`, `existing_managed_services_key_arn`/`_alias` — the first requester-controlled `encryption` fields; `encryption.workspace`/`application_data` stay entirely profile-derived), `governance.existing_metastore_id` (alongside the milestone-22 `catalog_admin_principal` — the first two requester-controlled `governance` fields), and `cloud.databricks_account_id`. All mirrored into `normalized-config.schema.json` too. The latter's now-dead `network.requirements.subnets.allocation` sub-schema (count/AZs/cidr_source — superseded by real auto-allocation, §8 milestone 28) was removed. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. As of §8 milestone 35, `cloud.provider`'s enum gained `"azure"` (both schemas) and `normalized-config.schema.json`'s `cloud.account` pattern was relaxed to accept either a 12-digit AWS account id or a UUID-shaped Azure subscription id - no other schema change was needed since `network.vpc_cidr`/`governance.catalog_admin_principal`/etc. were already cloud-agnostic strings with no AWS-specific pattern. |
 | `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely — `policies/network.yaml`'s `allowed_strategies` is now the only thing with an opinion on network strategy per environment (§8 milestone 16). |
 | `policies/policies.yaml` | Working | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping + per-environment `allowed_strategies`, validation blocking per env), one key per domain (`network_policy`, `security_policy`, `data_policy`, `governance_policy`, `validation_policy`). Trimmed to only the fields `resolver.py` actually reads (§8 milestone 15), gained `network_policy.allowed_strategies` (§8 milestone 16), then merged from five separate files into this one 2026-10-14 (§8 milestone 18 — closes §5.13's config-layer complexity review). |
@@ -3797,6 +3798,59 @@ Priority order agreed on:
       resources, the first workspace picking up the inventory audit
       default with no override. Validator: **5 PASS, 2 N/A, 1
       NOT_IMPLEMENTED** (`logging.centralized` PASS). It's **still live**.
+45. **Teardown wrapper — `resolver/teardown.py`** (2026-10-21). Every
+    Azure teardown this session had repeated the same hand steps:
+    `state rm` of the two one-way-locked legacy settings (milestone 38),
+    destroy, deleting the Databricks-managed resource group that never
+    cascades (milestones 35-44), then removing the state blob and
+    generated files. AWS has its own set: the "still attached to a
+    workspace" retry (milestone 36), the non-empty bucket and the UC
+    storage-credential lock (milestone 34).
+    - **What it does**, in order:
+      1. Resolves the workspace's cloud/environment from
+         `normalized/` (same `--provider` disambiguation as the other
+         scripts).
+      2. **Runs the two-file `terraform init` itself**, so it can't
+         destroy whatever workspace the shared root happened to point at.
+      3. Asks for confirmation by typing the workspace name, unless
+         `--yes`. With no terminal it refuses instead of hanging. That
+         covers a real Git Bash quirk found testing: `isatty()` reported
+         True for a redirected stdin, and EOF now counts as a refusal.
+      4. `state rm` of the locked settings, found **by resource type**,
+         so it works for the AWS module path and the Azure root alike.
+      5. `terraform destroy`, up to 3 attempts, retrying only on
+         known-transient patterns (connection reset / "HTTP response was
+         nil", "while it is attached to a workspace", TLS timeout).
+      6. Azure: deletes `rg-<name>-managed`, but **only after confirming
+         the workspace resource itself is gone**.
+      7. Confirms the state is empty.
+      8. `--purge-files`: deletes the state object (Azure blob / S3 key,
+         read from the shared backend file), the deployment directory,
+         the normalized config and validation evidence. The request file
+         is never touched.
+    - **Deliberately not automated (AWS)**: a `BucketNotEmpty` failure
+      stops with the `aws s3 rm` command to run by hand (emptying a
+      bucket deletes real data, and milestone 34 kept `force_destroy`
+      off for exactly that reason). The storage-credential "dependent
+      storage location" lock stops with milestone 34's exact
+      `plan -target`/`apply`/`destroy -target` sequence.
+    - Verified:
+      - **Guard rails**: an ambiguous name errors; running without
+        `--yes` against the **live** Azure `isolated-proof` refused, and
+        its 22 state entries were untouched afterward. Against AWS
+        `isolated-proof`'s empty state, it inited the AWS backend,
+        found 0 resources and finished without destroying anything.
+      - **Live (Azure)**: deployed a throwaway `teardown-proof` (21
+        resources) through the normal pipeline, then ran `teardown.py
+        --yes --purge-files`. One pass, exit 0: 2 locked settings
+        `state rm`'d, 19 destroyed, managed resource group deleted, state
+        blob and local files removed. Afterward both resource groups
+        and the blob were confirmed absent.
+    - **Not yet exercised live**: the AWS destroy path beyond the
+      empty-state run, and the hazard/retry branches. They're coded from
+      the error texts recorded in milestones 34/36/43, and the next real
+      AWS teardown will test them.
+
 ## 9. Conventions observed (keep consistent)
 
 - Every top-level cloud-specific location is grouped under a `<cloud>/`
@@ -3893,6 +3947,11 @@ Priority order agreed on:
   -backend-config=../../deployments/azure/<env>/<name>/backend.tfbackend
   -reconfigure -input=false && terraform plan
   -var-file=../../deployments/azure/<env>/<name>/terraform.tfvars.json`.
+- **Tearing down a workspace**: use `python resolver/teardown.py
+  --workspace <name> --yes` (add `--purge-files` for a throwaway) rather
+  than a hand-run `terraform destroy` - see §8 milestone 45 for every
+  step it covers. It re-inits the backend itself, so it can't hit the
+  wrong workspace's state.
 - **Before any `plan`/`apply`, confirm which workspace's backend is
   currently active** — there is no per-directory safety net: a shared
   root always points at whichever `-backend-config` files were last
