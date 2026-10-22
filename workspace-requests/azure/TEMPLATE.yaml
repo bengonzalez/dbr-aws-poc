@@ -54,9 +54,26 @@ network:
   #              see policies/policies.yaml's allowed_strategies).
   strategy: isolated
 
+  # Classic (back-end) Private Link: clusters reach the Databricks control
+  # plane and the workspace's DBFS storage over private endpoints instead
+  # of the internet. Always on for stage/live (they can't opt out); off
+  # for dev unless you set it here. Users still reach the workspace UI/API
+  # over its public endpoint either way.
+  # connectivity: privatelink
+  #
+  # Private Link with custom: by default each workspace creates and links
+  # its own privatelink DNS zones, which works for ONE Private Link
+  # workspace per VNet. To share a VNet, or to use a hub's central zones,
+  # give all three hub zones instead:
+  # existing_private_dns_zone_ids:
+  #   - /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/privateDnsZones/privatelink.azuredatabricks.net
+  #   - /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/privateDnsZones/privatelink.dfs.core.windows.net
+  #   - /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net
+
   # --- isolated only ---
   # Your own address-space choice for this brand-new VNet - needs at least
-  # a /23 (two /24 subnets are carved out of it automatically). Azure has
+  # a /23 (two /24 subnets are carved out of it automatically), or a /22
+  # with Private Link (it needs a third subnet for its endpoints). Azure has
   # no reserved-pool/collision-checker equivalent yet (resolver/
   # check_cidr_allocations.py is AWS-only), so just pick something that
   # doesn't collide with any other VNet you manage.
@@ -79,6 +96,8 @@ network:
   # with an NSG associated, and not used by any other workspace. These are
   # invisible to the auto-allocation above, so don't mix the two styles in
   # the same VNet without leaving the adopted ranges out of the way.
+  # Adopting subnets can't be combined with Private Link yet (so not in
+  # stage/live).
   # existing_subnet_ids:
   #   - /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/<name>/subnets/<public>
   #   - /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/<name>/subnets/<private>

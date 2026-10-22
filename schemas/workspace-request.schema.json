@@ -178,7 +178,7 @@
             "nat",
             "auto"
           ],
-          "description": "How isolated-strategy classic compute reaches the Databricks control plane. 'privatelink' requires an Enterprise-tier Databricks account (rejected otherwise); 'nat' always builds a NAT Gateway; 'auto' (default if omitted) picks PrivateLink when the target Databricks account supports it, NAT otherwise. Moot for 'custom' strategy workspaces reusing an existing VPC's own connectivity."
+          "description": "How isolated-strategy classic compute reaches the Databricks control plane. 'privatelink' requires an Enterprise-tier Databricks account (rejected otherwise); 'nat' always builds a NAT Gateway; 'auto' (default if omitted) picks PrivateLink when the target Databricks account supports it, NAT otherwise. Moot for 'custom' strategy workspaces reusing an existing VPC's own connectivity. Azure (CLAUDE.md §8 milestone 46): 'privatelink' turns on classic (back-end) Private Link; 'auto'/omitted turns it on in stage/live and leaves it off in dev; 'nat' is rejected."
         },
 
         "vpc_cidr": {
@@ -207,6 +207,14 @@
             "type": "string"
           },
           "description": "IDs of existing route tables the client's existing VPC (existing_vpc_id) already has, for Terraform to attach new subnets to instead of creating fresh route tables. Optional - when present, routing (and, by default, endpoints) ownership automatically resolves to 'existing'. Omit when the VPC has no usable route tables yet (e.g. a bare VPC) - routing then correctly resolves to 'terraform'."
+        },
+
+        "existing_private_dns_zone_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Azure only, with Private Link: full resource ids of existing hub private DNS zones for privatelink.azuredatabricks.net, privatelink.dfs.core.windows.net and privatelink.blob.core.windows.net (all three), used instead of per-workspace zones. Needed when several Private Link workspaces share a client VNet. Records are written into these zones, so the deployer needs rights on them."
         },
 
         "existing_subnet_ids": {

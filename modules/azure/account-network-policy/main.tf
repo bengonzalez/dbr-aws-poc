@@ -46,7 +46,7 @@ resource "databricks_account_network_policy" "this" {
   # - even the permissive one below - needs context-based ingress, a gated
   # account feature: an account without it rejects the whole policy with
   # "Feature `CBI Policy Private Access` has not been enabled for account"
-  # (found applying this for real, CLAUDE.md ง8 milestone 44). Omitting it
+  # (found applying this for real, CLAUDE.md ยง8 milestone 44). Omitting it
   # matches the account's own default-policy, which has no ingress block.
   # Setting context_based_ingress_ip_acl still needs Databricks to enable
   # that feature on the account first.

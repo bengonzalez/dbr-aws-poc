@@ -34,7 +34,7 @@ import os
 import shutil
 import subprocess
 
-from generate_tfvars_azure import resolve_azure_account_inventory
+from generate_tfvars_azure import resolve_azure_account_inventory, resolve_private_link
 from validate_deployment import (
     FAIL,
     NOT_APPLICABLE,
@@ -156,6 +156,11 @@ def _not_deployed(normalized: dict, reason: str) -> list[CheckResult]:
     results = [
         CheckResult("workspace.exists", FAIL, reason),
         CheckResult("network.required", FAIL, "workspace not deployed"),
+        CheckResult(
+            "network.private_link",
+            FAIL if resolve_private_link(normalized) else NOT_APPLICABLE,
+            "workspace not deployed" if resolve_private_link(normalized) else "Private Link is off",
+        ),
     ]
 
     for name, setting in (
@@ -357,6 +362,77 @@ def check_unity_catalog(
     return results
 
 
+def _approved_group_ids(resource: dict) -> set[str]:
+    """Sub-resource names (databricks_ui_api, dfs, blob...) of a resource's
+    private endpoint connections whose state is Approved."""
+
+    approved = set()
+
+    for connection in _get(resource, "properties", "privateEndpointConnections") or []:
+        state = _get(connection, "properties", "privateLinkServiceConnectionState", "status")
+
+        if (state or "").lower() == "approved":
+            approved.update(g.lower() for g in (_get(connection, "properties", "groupIds") or []))
+
+    return approved
+
+
+def check_private_link(normalized: dict, workspace: dict) -> CheckResult:
+    """Classic Private Link (CLAUDE.md §8 milestone 46): the workspace has
+    dropped Azure-injected NSG rules and has an approved databricks_ui_api
+    endpoint, and its DBFS storage has approved dfs + blob endpoints."""
+
+    if resolve_private_link(normalized) is None:
+        return CheckResult(
+            "network.private_link",
+            NOT_APPLICABLE,
+            f"Private Link is off for this {normalized['workspace']['environment']} workspace",
+        )
+
+    nsg_rules = _get(workspace, "properties", "requiredNsgRules")
+    problems = []
+
+    if nsg_rules != "NoAzureDatabricksRules":
+        problems.append(f"requiredNsgRules={nsg_rules!r}")
+
+    if "databricks_ui_api" not in _approved_group_ids(workspace):
+        problems.append("no approved databricks_ui_api private endpoint on the workspace")
+
+    managed_rg = (_get(workspace, "properties", "managedResourceGroupId") or "").split("/")[-1]
+    accounts, error = run_az(["storage", "account", "list", "-g", managed_rg])
+
+    dbfs = [a for a in (accounts or []) if (a.get("name") or "").startswith("dbstorage")]
+
+    if error or len(dbfs) != 1:
+        problems.append(f"couldn't find the DBFS storage account in {managed_rg!r} ({error or len(dbfs)})")
+    else:
+        # az storage output is flattened and has no groupIds for storage
+        # connections, so match the approved connections by the private
+        # endpoints' own names (pe-<workspace>-dbfs-<dfs|blob>, from
+        # modules/azure/workspace-private-link).
+        approved_endpoints = {
+            (_get(c, "privateEndpoint", "id") or "").rsplit("/", 1)[-1].lower()
+            for c in dbfs[0].get("privateEndpointConnections") or []
+            if (_get(c, "privateLinkServiceConnectionState", "status") or "").lower() == "approved"
+        }
+        name = normalized["workspace"]["name"]
+        missing = sorted(
+            kind for kind in ("dfs", "blob") if f"pe-{name}-dbfs-{kind}".lower() not in approved_endpoints
+        )
+
+        if missing:
+            problems.append(f"DBFS storage {dbfs[0]['name']} missing approved endpoints: {missing}")
+
+    if problems:
+        return CheckResult("network.private_link", FAIL, "; ".join(problems))
+
+    return CheckResult(
+        "network.private_link",
+        PASS,
+        "requiredNsgRules=NoAzureDatabricksRules; databricks_ui_api + DBFS dfs/blob endpoints approved",
+    )
+
+
 def check_compliance_profile(normalized: dict, workspace: dict) -> CheckResult | None:
     standards = normalized["governance"].get("compliance_standards") or []
 
@@ -458,6 +534,7 @@ def run_checks_azure(normalized: dict, deployment: dict, inventory: dict) -> lis
     results = [
         CheckResult("workspace.exists", PASS if state == "Succeeded" else FAIL, f"provisioningState={state!r}"),
         check_network(normalized, deployment, workspace),
+        check_private_link(normalized, workspace),
         check_workspace_encryption(normalized, workspace),
         check_application_data_encryption(normalized, outputs.get("unity_catalog_storage_account_name")),
     ]

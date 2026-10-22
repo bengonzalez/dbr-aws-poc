@@ -29,6 +29,8 @@ module "network" {
   existing_public_subnet_id  = var.network.existing_public_subnet_id
   existing_private_subnet_id = var.network.existing_private_subnet_id
   tags                       = local.common_tags
+
+  private_endpoint_subnet_cidr = var.private_link.enabled ? var.network.private_endpoint_subnet_cidr : null
 }
 
 locals {
@@ -94,6 +96,14 @@ resource "azurerm_databricks_workspace" "this" {
   default_storage_firewall_enabled = true
   access_connector_id              = azurerm_databricks_access_connector.dbfs.id
 
+  # Classic Private Link (CLAUDE.md §8 milestone 46): the workspace stops
+  # using Azure-injected NSG rules; cluster -> control plane and cluster
+  # -> DBFS go through the private endpoints below instead. Public network
+  # access stays on - front-end Private Link is out of scope. Both left
+  # null when off, so existing workspaces see no diff.
+  network_security_group_rules_required = var.private_link.enabled ? "NoAzureDatabricksRules" : null
+  public_network_access_enabled         = var.private_link.enabled ? true : null
+
   # Customer-managed keys - managed services is checked by Azure at create
   # time (the kms module's output waits on its grant); managed disks and
   # DBFS root are granted to identities this resource creates, below. Both
@@ -127,6 +137,25 @@ resource "azurerm_databricks_workspace" "this" {
   depends_on = [
     module.network,
   ]
+}
+
+module "private_link" {
+  count  = var.private_link.enabled ? 1 : 0
+  source = "../workspace-private-link"
+
+  workspace_name                = var.workspace.name
+  resource_group_name           = azurerm_resource_group.this.name
+  location                      = var.cloud.region
+  workspace_resource_id         = azurerm_databricks_workspace.this.id
+  managed_resource_group_name   = azurerm_databricks_workspace.this.managed_resource_group_name
+  virtual_network_id            = module.network.virtual_network_id
+  private_endpoint_subnet_id    = module.network.private_endpoint_subnet_id
+  existing_private_dns_zone_ids = var.private_link.existing_private_dns_zone_ids
+  tags                          = local.common_tags
+
+  # Its DBFS storage lookup reads the managed resource group, which only
+  # exists once the workspace does.
+  depends_on = [azurerm_databricks_workspace.this]
 }
 
 # Post-create CMK grants: the disk encryption set and the workspace storage

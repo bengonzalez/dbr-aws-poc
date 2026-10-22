@@ -46,6 +46,9 @@ variable "network" {
     existing_vnet_id           = optional(string)
     existing_public_subnet_id  = optional(string)
     existing_private_subnet_id = optional(string)
+
+    # Private Link's private-endpoint subnet (CLAUDE.md §8 milestone 46).
+    private_endpoint_subnet_cidr = optional(string)
   })
 }
 
@@ -82,4 +85,22 @@ variable "audit_log_categories" {
   description = "Databricks workspace diagnostic log categories to enable when log_analytics_workspace_id is set (confirmed against Microsoft's own current reference table, not guessed - category_group shortcuts like \"allLogs\" are not confirmed supported for this resource type). Default covers the categories that map most directly to AWS's broad AUDIT_LOGS log type."
   type        = list(string)
   default     = ["accounts", "clusters", "dbfs", "jobs", "notebook", "secrets", "sqlPermissions", "ssh", "unityCatalog", "workspace"]
+}
+
+variable "private_link" {
+  description = "Classic (back-end) Private Link (CLAUDE.md §8 milestone 46). enabled = true switches the workspace to NoAzureDatabricksRules and adds databricks_ui_api + DBFS dfs/blob private endpoints in network.private_endpoint_subnet_cidr's subnet. existing_private_dns_zone_ids (keys databricks/dfs/blob) uses client hub zones instead of creating and linking per-workspace ones."
+  type = object({
+    enabled = bool
+    existing_private_dns_zone_ids = optional(object({
+      databricks = string
+      dfs        = string
+      blob       = string
+    }))
+  })
+  default = { enabled = false }
+
+  validation {
+    condition     = !var.private_link.enabled || var.network.private_endpoint_subnet_cidr != null
+    error_message = "private_link.enabled needs network.private_endpoint_subnet_cidr."
+  }
 }

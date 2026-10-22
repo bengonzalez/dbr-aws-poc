@@ -23,3 +23,7 @@ output "private_subnet_name" {
 output "private_subnet_nsg_association_id" {
   value = local.create_subnets ? azurerm_subnet_network_security_group_association.private[0].id : data.azurerm_subnet.existing_private[0].id
 }
+
+output "private_endpoint_subnet_id" {
+  value = try(azurerm_subnet.private_endpoints[0].id, null)
+}

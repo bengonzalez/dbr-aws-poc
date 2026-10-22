@@ -21,11 +21,12 @@ manual teardown step this project has had to repeat by hand:
   5. Optional --purge-files (for throwaways): deletes the now-empty state
      object and the workspace's generated local files.
 
-Two AWS hazards are detected and STOPPED on, not fixed: a non-empty S3
-bucket (emptying it deletes real data - milestone 34 kept force_destroy
-off on purpose) and the Unity Catalog storage-credential "dependent
+Data-loss hazards are detected and STOPPED on, not fixed: on both clouds
+a Unity Catalog catalog that still holds schemas/tables (milestone 46);
+on AWS, a non-empty S3 bucket (emptying it deletes real data - milestone
+34 kept force_destroy off on purpose) and the Unity Catalog storage-credential "dependent
 storage location" lock (milestone 34's plan/apply-then-destroy sequence).
-Both print the exact manual steps.
+Each prints the exact manual steps.
 
 AWS still needs the usual Databricks CLI profile for the account root
 (TF_VAR_databricks_profile or infrastructure/aws/workspace/
@@ -54,6 +55,7 @@ TRANSIENT_PATTERNS = (
     r"connection (may have been )?reset",
     r"while it is attached to a workspace",
     r"TLS handshake timeout",
+    r"dial tcp .*(connection attempt failed|i/o timeout)",
 )
 
 MAX_DESTROY_ATTEMPTS = 3
@@ -167,6 +169,27 @@ def check_aws_hazards(output: str) -> None:
         )
 
 
+def check_catalog_not_empty(output: str) -> None:
+    """Both clouds: Unity Catalog refuses to drop a catalog that still has
+    schemas/tables (found tearing down a Private Link test workspace with a
+    real table, CLAUDE.md §8 milestone 46). Neither catalog module sets
+    force_destroy - same don't-make-data-loss-easy stance as the S3 buckets
+    - so stop with the manual step instead."""
+
+    match = re.search(r"Catalog '([^']+)' is not empty", output)
+
+    if match:
+        catalog = match.group(1)
+        raise TeardownError(
+            f"Catalog '{catalog}' still holds schemas/tables. Dropping them "
+            f"deletes that data, so this script won't. If that's intended, "
+            f"drop each non-default schema (e.g. `databricks schemas delete "
+            f"{catalog}.<schema> --force` against the workspace, or `DROP "
+            f"SCHEMA ... CASCADE` in SQL), then re-run - the destroy resumes "
+            f"where it stopped."
+        )
+
+
 def destroy(root: Path, var_file: str, provider: str) -> None:
     for attempt in range(1, MAX_DESTROY_ATTEMPTS + 1):
         log(f"terraform destroy (attempt {attempt}/{MAX_DESTROY_ATTEMPTS})")
@@ -183,6 +206,8 @@ def destroy(root: Path, var_file: str, provider: str) -> None:
             summary = re.search(r"Destroy complete! Resources: \d+ destroyed\.", output)
             log(summary.group(0) if summary else "destroy complete")
             return
+
+        check_catalog_not_empty(output)
 
         if provider == "aws":
             check_aws_hazards(output)

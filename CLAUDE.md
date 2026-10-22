@@ -159,6 +159,7 @@ requirements, security controls, Terraform behavior.
 | `modules/aws/workspace-deployment` | **Working** | The composed, real deployment logic: network, endpoints, PrivateLink, IAM role, KMS, credentials/storage/network/workspace registration, government-readiness hardening (§8 milestone 38 — `module.workspace_hardening`, after `databricks_mws_workspaces.this`), optional account-level network policy attachment (§8 milestone 39 — `databricks_workspace_network_option.this`, `count = 1` only when `var.network_policy_id` is non-null; real finding, not an argument on `databricks_mws_workspaces` itself). Called by the one shared root (above) for every workspace — no longer "called by every new per-workspace directory" now that milestone 10's approach was superseded by milestone 12. Deliberately excludes the old scratch `terraform_data.workspace_configuration` resource (§5.5) — no reason to carry known debt into this module. `s3.tf`'s root-bucket policy now also merges in an explicit `DenyInsecureTransport` statement (§8 milestone 38) on top of the Databricks-generated policy, via `aws_iam_policy_document`'s `source_policy_documents`. |
 | `modules/azure/workspace-network`, `modules/azure/workspace-deployment` | **New, §8 milestone 35; hardened §8 milestone 38; audit logging §8 milestone 40** | Azure's analogs of `modules/aws/workspace-network`/`modules/aws/workspace-deployment` — nested under a top-level `modules/azure/` directory (mirroring `databricks/terraform-databricks-sra`'s own `aws/`/`azure/` split; initially prefixed `azure-` instead, moved into this nested layout before the first commit once the user asked for cloud-segregated directories across the whole repo). `workspace-network`: create-only VNet-injection path validated by a real-subscription spike — VNet + two `Microsoft.Databricks/workspaces`-delegated subnets + a baseline NSG (default rules only — confirmed sufficient for real cluster traffic by the milestone 37 cluster/NSG spike, no longer an open gap). As of §8 milestone 41, also supports reusing a client VNet (`existing_vnet_id`), either creating the two delegated subnets + NSG inside it or adopting two existing ones (`existing_public_subnet_id`/`existing_private_subnet_id`). `workspace-deployment`: creates its own dedicated resource group + calls `workspace-network` + `azurerm_databricks_workspace` (`sku = "premium"`, `custom_parameters` wired to the network module's outputs, plus — §8 milestone 38 — `default_storage_firewall_enabled = true` with a dedicated `azurerm_databricks_access_connector.dbfs`, and a native `enhanced_security_compliance` block gated on `compliance_standards` being non-empty), plus — §8 milestone 40 — an optional `azurerm_monitor_diagnostic_setting.audit_logs` (gated on `log_analytics_workspace_id` being non-null) pointed at the shared Log Analytics workspace `infrastructure/azure/account/` creates; real finding behind this split: Azure has no account-level "enable audit logging for every workspace" switch the way AWS does, `azurerm_monitor_diagnostic_setting` is always scoped to one resource. Deliberately does **not** compose Unity Catalog the way `modules/aws/workspace-deployment` does — see `infrastructure/azure/workspace/*.tf`'s row above for why. |
 | `modules/azure/workspace-kms` | **New, §8 milestone 42, real-apply-verified** | Azure analog of `modules/aws/workspace-kms`, composed by `modules/azure/workspace-deployment`. Up to three keys (`workspace_storage` for managed disks + DBFS root, `managed_services`, `application_data` for the UC storage account), each created in a per-workspace RBAC-mode Key Vault (purge protection, 7-day soft delete, random name suffix) or brought by the client (`existing_*_key_id`, a full ARM key id; the brought vault is checked at plan time for RBAC + purge protection). Grants the `AzureDatabricks` first-party app (looked up via `azuread`) on the managed-services key before workspace creation. The disk-encryption-set/workspace-storage grants live in `workspace-deployment`, and the UC storage account's grant lives in `unity-catalog-data`, since those identities only exist after this module runs. |
+| `modules/azure/workspace-private-link` | **New, §8 milestone 46, live-verified** | Classic (back-end) Private Link for one workspace: a `databricks_ui_api` private endpoint to the workspace, `dfs` + `blob` private endpoints to its DBFS storage account (found by type in the managed resource group), and the three `privatelink.*` DNS zones linked to the workspace VNet, or none when the client brings hub zones. Composed by `modules/azure/workspace-deployment` when `private_link.enabled`, which also switches the workspace to `NoAzureDatabricksRules` and adds a dedicated `/26` private-endpoint subnet via `workspace-network`. Front-end (user) Private Link is out of scope: the workspace keeps public network access. |
 | `modules/azure/unity-catalog-data`, `modules/azure/unity-catalog-workspace` | **New, §8 milestone 35, real-apply-verified by the spike (not this exact code, but the identical resource shapes)** | Azure's Unity Catalog modules — `unity-catalog-data` is a direct same-shape port of `modules/aws/unity-catalog-data` (ADLS Gen2 storage account + filesystem instead of an S3 bucket; `azurerm_databricks_access_connector` + an RBAC role assignment instead of an IAM role + policy; a `time_sleep` for RBAC propagation, same class of fix as AWS's IAM-propagation `time_sleep`; `databricks_storage_credential` with an `azure_managed_identity` block instead of `aws_iam_role`). `unity-catalog-workspace` is a deliberate **fork**, not a generalization, of `modules/aws/unity-catalog-workspace` — same `databricks_catalog`/`databricks_grants`/`databricks_default_namespace_setting` shape, but no `databricks_metastore_assignment` resource at all (Azure auto-assigns one) and no `provider_config { workspace_id }` blocks anywhere (both modules receive a workspace-URL-scoped `databricks` provider as their plain default, which already only ever talks to one workspace). Real, spike-validated simplification vs. AWS: **no `databricks_workspace_binding` resources at all** — AWS needs those only because its storage credential/external location are created through the account-level provider, which doesn't auto-bind isolated resources to the creating workspace; a workspace-scoped provider never has that mismatch. |
 | `modules/aws/workspace-network`, `modules/aws/workspace-endpoints`, `modules/aws/workspace-privatelink`, `modules/aws/workspace-iam-role`, `modules/aws/workspace-kms` | Working | Factory-style modules composed by `modules/aws/workspace-deployment`. `workspace-network` supports independent existing-or-create per sub-resource (vpc/routing/security-group, and, as of 2026-10-19, subnets too via `existing_subnet_ids` — §8 milestone 33) — both `custom` and `isolated` strategies are now real, not just modeled in config (§8) — and, as of 2026-10-15 (§8 milestone 27), an optional single-NAT-Gateway fallback (IGW, public subnet, EIP, NAT Gateway, default routes on the private route tables) gated on `nat_enabled && create_vpc`, for workspaces without Databricks PrivateLink available. `workspace-endpoints` provides the S3 gateway + STS (+ KMS, conditionally) interface endpoints needed whenever there's no NAT; its interface-endpoint security group ingress is scoped to the workspace compute security group (not a CIDR) — matches the SRA reference's approach (§7/§8); built regardless of whether NAT is also enabled (reduces NAT data-transfer cost either way). `workspace-privatelink` registers the two Databricks PrivateLink endpoints (REST API + SCC relay) and private access settings so classic compute can reach the control plane with no NAT — see §7/§8; requires Enterprise tier, see `network.connectivity` (§8 milestone 27) for the now-automatic NAT fallback when it isn't available. `workspace-iam-role` uses proper Databricks cross-account trust + restricted policy. `workspace-kms` provisions the customer-managed workspace-storage + managed-services keys, gated on `encryption.workspace == "customer_managed"`, with optional bring-your-own-existing-key inputs per key (§8). |
 | `modules/aws/unity-catalog-data/`, `modules/aws/unity-catalog-workspace/` | **Working, real-apply-verified** (§8 milestones 19, 21, 23) | `unity-catalog-data`: dedicated S3 bucket for UC managed storage, optional customer-managed KMS key (gated on `encryption.application_data`), the UC IAM role/policy chain (via `databricks_aws_unity_catalog_assume_role_policy`/`_policy` data sources, bootstrapped SRA-style to avoid the storage-credential/role circular dependency), a `time_sleep` for IAM propagation, storage credential (with an explicit `metastore_id` — required for account-level providers, §8 milestone 23), external location, and explicit `databricks_workspace_binding` resources for both the credential and external location (neither auto-binds to its creating workspace the way `databricks_catalog` does — found via a real apply, §8 milestone 23). `unity-catalog-workspace`: metastore assignment (to an existing, platform-owned metastore — not created here) + a dedicated, always-isolated catalog per workspace + default namespace setting + optional `databricks_grants` (§8 milestone 21). Both composed into `modules/aws/workspace-deployment`, gated on `governance.unity_catalog`, called *after* `databricks_mws_workspaces.this` (every UC resource that needs a real workspace ID uses `provider_config { workspace_id }` against the existing account-console provider — no second workspace-scoped provider needed). Real-apply-verified against `isolated-proof` (§8 milestone 23), not just `terraform plan`. |
@@ -3851,6 +3852,99 @@ Priority order agreed on:
       the error texts recorded in milestones 34/36/43, and the next real
       AWS teardown will test them.
 
+46. **Azure classic (back-end) Private Link — the §6 "no public
+    access" gap for cluster traffic, plus §10 #3 for Private Link
+    workspaces** (2026-10-22). Grounded in Microsoft's current Databricks
+    docs (Private Link concepts, classic compute plane private
+    connectivity, workspace storage firewall), fetched this session.
+    - **Decisions (user, via AskUserQuestion)**:
+      - **Default**: always on for stage/live, off for dev unless the
+        request sets `network.connectivity: privatelink`. This reuses the
+        existing cloud-neutral field: on Azure, `privatelink` = on;
+        `auto`/unset = on in stage/live, off in dev; `nat` = rejected.
+        Stage/live can't opt out. The environment rule is
+        `PRIVATE_LINK_REQUIRED_ENVIRONMENTS` in
+        `resolver/generate_tfvars_azure.py`.
+      - **DNS**: by default each workspace creates and links its own
+        three `privatelink.*` zones. New request field
+        `network.existing_private_dns_zone_ids` (all three, full ids)
+        uses hub zones instead; that's needed when several Private Link
+        workspaces share a client VNet, since a VNet can be linked to
+        only one zone per name.
+      - **DBFS `dfs`/`blob` private endpoints included.** The storage
+        firewall from milestone 38 had been working through
+        Azure-injected NSG rules, which `NoAzureDatabricksRules` removes.
+    - **What it builds**:
+      - On the workspace: `network_security_group_rules_required =
+        "NoAzureDatabricksRules"` and `public_network_access_enabled =
+        true`. Both stay null when Private Link is off, so existing
+        workspaces see no diff.
+      - A dedicated, non-delegated `/26` private-endpoint subnet.
+      - New `modules/azure/workspace-private-link`: the
+        `databricks_ui_api` endpoint, the DBFS `dfs`/`blob` endpoints
+        (the DBFS account is found via `azurerm_resources` in the managed
+        resource group, by its `dbstorage` prefix; the module call
+        `depends_on` the workspace so that read waits) and the DNS zones
+        and VNet links.
+      - Validator: new `network.private_link` check
+        (`NoAzureDatabricksRules`, approved `databricks_ui_api`
+        connection, approved DBFS endpoints).
+    - **Address space**: an isolated VNet needs **at least a `/22`** with
+      Private Link (`/24` public, `/24` private, then a `/26` endpoint
+      subnet from the third `/24`). Azure `isolated-proof`'s `/23` stays
+      without it (dev). For `custom`, the allocator adds the `/26` and
+      pins it. Adding Private Link to an already-pinned workspace only
+      appends the endpoint subnet, never moving existing ones. Adopted
+      subnets + Private Link are rejected (new §10 #13).
+    - **Live proof** (throwaway **`stage`** workspace `pl-stage-proof`,
+      `/22`, no `connectivity` field, so on purely by the stage default):
+      - **31 resources, first try.** Validator: `network.private_link`
+        PASS. The first run of that check had a bug of its own: `az
+        storage` output is flattened and has no `groupIds` for storage,
+        so endpoints are now matched by name.
+      - **A single-node cluster reached RUNNING** (the docs' failure
+        signature for a broken back-end Private Link is "Control Plane
+        Request Failure"), and notebook jobs ran successfully.
+      - From inside the cluster, the DBFS `dfs`/`blob` hostnames resolved
+        to the endpoint IPs (`10.92.2.6`/`.4`). The workspace hostname
+        resolved via Azure DNS through the `privatelink.azuredatabricks.net`
+        CNAME to the `databricks_ui_api` endpoint (`10.92.2.5`).
+        `gethostbyname` alone showed `10.92.0.4`, but that's the node's
+        local proxy entry in `/etc/hosts`. Databricks' own auto-added
+        comment there names `10.92.2.5` as the control-plane endpoint.
+      - A Unity Catalog table write/read succeeded. A DBFS root write was
+        refused ("Public DBFS root is disabled"), as expected from
+        milestone 38.
+    - **Plan-verified only**: `custom` + Private Link against a throwaway
+      client VNet (**30 to add**: 3 subnets allocated and pinned in the
+      client's resource group, zones linked to the client VNet), and the
+      same with three brought hub zones (**24 to add**: no zones or
+      links created, endpoint DNS groups point at the hub zones).
+    - **Teardown findings, both fixed**:
+      - A catalog holding data stops `terraform destroy` ("Catalog ... is
+        not empty"). `resolver/teardown.py` now detects that on both
+        clouds and stops with the manual drop step, the same
+        don't-delete-data stance as the S3 bucket case.
+      - After dropping the test schema, the **external location** still
+        refused deletion over "1 dependent managed table" (Unity Catalog
+        keeps dropped managed tables for undrop). Set `force_destroy =
+        true` on `databricks_external_location` in **both** clouds'
+        `unity-catalog-data` modules. The location's storage is destroyed
+        by the same Terraform, and the catalog check above still guards
+        live data. That's the same reasoning as milestone 34's storage
+        credential. The provider reads the flag from state, so an
+        already-applied workspace needs one apply to pick it up; done for
+        the live Azure `isolated-proof` (state-only change, no drift
+        after).
+      - The wrapper also now retries `dial tcp ... connection attempt
+        failed` (a state-storage network timeout hit mid-teardown).
+    - **Unrelated repair in the same change**: five files committed in
+      milestones 41-44 (both Azure `providers.tf`, both
+      `account-network-policy/main.tf`, `azure/workspace-network/main.tf`)
+      had a `§` written as a lone cp1252 byte by inline-Python edits
+      without `encoding="utf-8"`. Repaired byte-precisely (only the
+      invalid bytes re-decoded), and a whole-repo UTF-8 scan is clean.
+
 ## 9. Conventions observed (keep consistent)
 
 - Every top-level cloud-specific location is grouped under a `<cloud>/`
@@ -4011,7 +4105,10 @@ deleting it silently.
    GovCloud/Azure Government subscription to verify against, the same
    way every other milestone in this project has insisted on a real
    apply over plan-only speculation?
-3. **Azure NSG rule ownership** (`network_security_group_rules_required
+3. **Azure NSG rule ownership — done for every Private Link workspace
+   (all stage/live), see §8 milestone 46.** Still open only for dev
+   workspaces without Private Link, which keep `AllRules`.
+   (`network_security_group_rules_required
    = "NoAzureDatabricksRules"`, deferred from milestone 38's explicit
    scope decision 3). SRA sets this so the customer owns every NSG
    rule; this factory's baseline-NSG cluster spike (§8 milestone 37)
@@ -4062,3 +4159,12 @@ deleting it silently.
     etc. are constants; a workspace's `key` is always
     `<environment>/<name>/terraform.tfstate`). Lowest-priority item on
     this list — a tooling nicety, not a capability gap.
+
+12. **Azure front-end (user) Private Link** (deferred from milestone 46).
+    Workspaces keep public network access; closing it needs a transit
+    VNet, a `browser_authentication` endpoint per region, and a network
+    path in for users and for this factory's own tooling (VPN/jump
+    host/CI runner in the VNet) before it can be turned on.
+13. **Azure Private Link with adopted subnets** (deferred from milestone
+    46). Rejected today with a clear error; would need a brought
+    private-endpoint subnet id alongside `existing_subnet_ids`.

@@ -39,27 +39,139 @@ AZURE_VNET_ID_PATTERN = re.compile(
 # comfortably above Azure Databricks' own /26 minimum per subnet.
 CUSTOM_SUBNET_PREFIX_LENGTH = 24
 
+# Private Link's private-endpoint subnet (CLAUDE.md §8 milestone 46): 3
+# endpoints today; Microsoft recommends /27-/28 minimum, /26 leaves room.
+PRIVATE_ENDPOINT_PREFIX_LENGTH = 26
 
-def derive_subnet_cidrs(vpc_cidr: str) -> tuple[str, str]:
+# Environments where classic Private Link is required (user's call,
+# milestone 46): on regardless of the request, and a request can't opt
+# out. Elsewhere (dev) it's opt-in via network.connectivity: privatelink.
+PRIVATE_LINK_REQUIRED_ENVIRONMENTS = ("stage", "live")
+
+PRIVATE_DNS_ZONE_KEYS = {
+    "privatelink.azuredatabricks.net": "databricks",
+    "privatelink.dfs.core.windows.net": "dfs",
+    "privatelink.blob.core.windows.net": "blob",
+}
+
+AZURE_DNS_ZONE_ID_PATTERN = re.compile(
+    r"^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/"
+    r"Microsoft\.Network/privateDnsZones/[^/]+$",
+    re.IGNORECASE,
+)
+
+
+def derive_subnet_cidrs(vpc_cidr: str, private_endpoints: bool = False) -> tuple[str, str, str | None]:
     """
     Carve the first two /24s out of vpc_cidr for Azure's fixed two-subnet
     VNet-injection model (Databricks' own "public"/"private" naming - not
     AZ-scoped the way AWS subnets are, so there's no per-region
-    subnet_defaults/availability_zones inventory lookup needed here).
+    subnet_defaults/availability_zones inventory lookup needed here) -
+    plus, with Private Link, a /26 private-endpoint subnet from the third
+    /24, which needs at least a /22.
     """
 
     network = ipaddress.ip_network(vpc_cidr, strict=True)
     subnets = list(network.subnets(new_prefix=24))
+    needed = 3 if private_endpoints else 2
 
-    if len(subnets) < 2:
+    if len(subnets) < needed:
         raise ValueError(
-            f"network.vpc_cidr '{vpc_cidr}' is too small to carve two "
-            f"/24 subnets from - use at least a /23."
+            f"network.vpc_cidr '{vpc_cidr}' is too small - use at least a "
+            f"/{24 - (needed - 1).bit_length()}"
+            + (" (Private Link needs a third subnet for its endpoints)." if private_endpoints else ".")
         )
 
-    public_subnet_cidr, private_subnet_cidr = str(subnets[0]), str(subnets[1])
+    private_endpoint_subnet_cidr = (
+        str(next(subnets[2].subnets(new_prefix=PRIVATE_ENDPOINT_PREFIX_LENGTH)))
+        if private_endpoints else None
+    )
 
-    return public_subnet_cidr, private_subnet_cidr
+    return str(subnets[0]), str(subnets[1]), private_endpoint_subnet_cidr
+
+
+def resolve_private_link(normalized: dict) -> dict | None:
+    """
+    Resolve classic Private Link (CLAUDE.md §8 milestone 46) from the
+    request's cloud-neutral network.connectivity plus the environment:
+
+      privatelink        -> on
+      auto / unset       -> on in stage/live, off in dev
+      nat                -> rejected (an AWS concept; no NAT on Azure)
+
+    Returns the Terraform private_link object, or None when off. Brought
+    hub DNS zones (network.existing_private_dns_zone_ids) must cover all
+    three privatelink zones and only make sense when it's on.
+    """
+
+    network = normalized["network"]
+    connectivity = network.get("connectivity", "auto")
+    environment = normalized["workspace"]["environment"]
+
+    if connectivity == "nat":
+        raise ValueError(
+            "network.connectivity 'nat' doesn't apply to Azure (cluster "
+            "egress uses Azure's default outbound access). Use "
+            "'privatelink', or leave it unset."
+        )
+
+    enabled = connectivity == "privatelink" or environment in PRIVATE_LINK_REQUIRED_ENVIRONMENTS
+    zone_ids = network.get("existing_private_dns_zone_ids")
+
+    if not enabled:
+        if zone_ids:
+            raise ValueError(
+                "network.existing_private_dns_zone_ids is set, but Private "
+                f"Link is off for this {environment} workspace - set "
+                "network.connectivity: privatelink, or remove the zones."
+            )
+
+        return None
+
+    private_link = {"enabled": True}
+
+    if zone_ids:
+        by_key = {}
+
+        for zone_id in zone_ids:
+            if not AZURE_DNS_ZONE_ID_PATTERN.match(zone_id):
+                raise ValueError(
+                    f"network.existing_private_dns_zone_ids entry '{zone_id}' "
+                    f"is not a full private DNS zone resource id."
+                )
+
+            key = PRIVATE_DNS_ZONE_KEYS.get(zone_id.rsplit("/", 1)[-1].lower())
+
+            if key is None:
+                raise ValueError(
+                    f"network.existing_private_dns_zone_ids entry '{zone_id}' "
+                    f"isn't one of {sorted(PRIVATE_DNS_ZONE_KEYS)}."
+                )
+
+            by_key[key] = zone_id
+
+        missing = sorted(name for name, key in PRIVATE_DNS_ZONE_KEYS.items() if key not in by_key)
+
+        if missing:
+            raise ValueError(
+                f"network.existing_private_dns_zone_ids must cover all three "
+                f"privatelink zones - missing {missing}."
+            )
+
+        private_link["existing_private_dns_zone_ids"] = by_key
+
+    return private_link
+
+
+def _first_free(vnet_cidr: str, prefix_length: int, used: list[ipaddress.IPv4Network]) -> ipaddress.IPv4Network | None:
+    return next(
+        (
+            candidate
+            for candidate in ipaddress.ip_network(vnet_cidr, strict=True).subnets(new_prefix=prefix_length)
+            if not any(candidate.overlaps(other) for other in used)
+        ),
+        None,
+    )
 
 
 def resolve_existing_vnet(normalized: dict, deployment: dict) -> tuple[str, str | None, list[str] | None]:
@@ -152,7 +264,7 @@ def _custom_subnets_in_vnet(vnet_id: str, exclude_workspace: str) -> list[ipaddr
             if (network.get("existing_vpc_id") or "").lower() != vnet_id.lower():
                 continue
 
-            for key in ("public_subnet_cidr", "private_subnet_cidr"):
+            for key in ("public_subnet_cidr", "private_subnet_cidr", "private_endpoint_subnet_cidr"):
                 if network.get(key):
                     used.append(ipaddress.ip_network(network[key]))
 
@@ -183,20 +295,36 @@ def ensure_custom_subnet_allocation(
         return deployment
 
     vnet_id, vnet_cidr, subnet_ids = resolve_existing_vnet(normalized, deployment)
+    private_link = resolve_private_link(normalized) is not None
 
     if subnet_ids:
+        if private_link:
+            raise ValueError(
+                "Private Link with adopted subnets (network.existing_subnet_ids) "
+                "isn't supported yet - it would also need a brought "
+                "private-endpoint subnet. Let the platform create the subnets "
+                "(omit existing_subnet_ids), or turn Private Link off (dev only)."
+            )
+
         return deployment
 
     network = dict(deployment.get("network", {}))
 
     if network.get("public_subnet_cidr") and network.get("private_subnet_cidr"):
+        if private_link and not network.get("private_endpoint_subnet_cidr"):
+            raise ValueError(
+                "This workspace's deployment.yaml hand-types its subnet CIDRs, "
+                "so it must also set network.private_endpoint_subnet_cidr for "
+                "Private Link."
+            )
+
         return deployment
 
     allocated_path = deployment_dir / "allocated-subnets.yaml"
+    pinned = load_yaml(allocated_path)["network"] if allocated_path.exists() else None
+    needs_pe = private_link and not (pinned or {}).get("private_endpoint_subnet_cidr")
 
-    if allocated_path.exists():
-        allocated = load_yaml(allocated_path)["network"]
-    else:
+    if pinned is None or needs_pe:
         if not vnet_cidr:
             raise ValueError(
                 "network.existing_vpc_cidr is required to auto-allocate "
@@ -208,27 +336,36 @@ def ensure_custom_subnet_allocation(
             )
 
         used = _custom_subnets_in_vnet(vnet_id, exclude_workspace=workspace_name)
+        allocated = dict(pinned) if pinned else {"existing_vpc_id": vnet_id}
 
-        free = [
-            candidate
-            for candidate in ipaddress.ip_network(vnet_cidr, strict=True).subnets(
-                new_prefix=CUSTOM_SUBNET_PREFIX_LENGTH
-            )
-            if not any(candidate.overlaps(other) for other in used)
-        ][:2]
+        # Adding Private Link to an already-pinned workspace only adds the
+        # endpoint subnet - its existing subnets never move.
+        wanted = [] if pinned else [
+            ("public_subnet_cidr", CUSTOM_SUBNET_PREFIX_LENGTH),
+            ("private_subnet_cidr", CUSTOM_SUBNET_PREFIX_LENGTH),
+        ]
 
-        if len(free) < 2:
-            raise ValueError(
-                f"Could not auto-allocate two /{CUSTOM_SUBNET_PREFIX_LENGTH} "
-                f"subnets within {vnet_cidr} - not enough free address space "
-                f"given what other workspaces already use in VNet {vnet_id}."
-            )
+        if needs_pe:
+            wanted.append(("private_endpoint_subnet_cidr", PRIVATE_ENDPOINT_PREFIX_LENGTH))
 
-        allocated = {
-            "existing_vpc_id": vnet_id,
-            "public_subnet_cidr": str(free[0]),
-            "private_subnet_cidr": str(free[1]),
-        }
+        used.extend(
+            ipaddress.ip_network(allocated[key])
+            for key in ("public_subnet_cidr", "private_subnet_cidr")
+            if key in allocated
+        )
+
+        for key, prefix_length in wanted:
+            block = _first_free(vnet_cidr, prefix_length, used)
+
+            if block is None:
+                raise ValueError(
+                    f"Could not auto-allocate a /{prefix_length} for {key} "
+                    f"within {vnet_cidr} - not enough free address space "
+                    f"given what other workspaces already use in VNet {vnet_id}."
+                )
+
+            allocated[key] = str(block)
+            used.append(block)
 
         allocated_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -246,9 +383,12 @@ def ensure_custom_subnet_allocation(
             )
             json.dump({"network": allocated}, file, indent=2)
             file.write("\n")
+    else:
+        allocated = pinned
 
-    network.setdefault("public_subnet_cidr", allocated["public_subnet_cidr"])
-    network.setdefault("private_subnet_cidr", allocated["private_subnet_cidr"])
+    for key in ("public_subnet_cidr", "private_subnet_cidr", "private_endpoint_subnet_cidr"):
+        if key in allocated:
+            network.setdefault(key, allocated[key])
 
     return {**deployment, "network": network}
 
@@ -354,6 +494,7 @@ def resolve_azure_account_inventory(account_id: str, inventory: dict) -> dict:
 
 def build_tfvars_azure(normalized: dict, deployment: dict, inventory: dict) -> dict:
     network_strategy = normalized["network"]["strategy"]
+    private_link = resolve_private_link(normalized)
 
     if network_strategy == "isolated":
         vpc_cidr = normalized["network"].get("vpc_cidr")
@@ -365,13 +506,18 @@ def build_tfvars_azure(normalized: dict, deployment: dict, inventory: dict) -> d
                 "same as the AWS path."
             )
 
-        public_subnet_cidr, private_subnet_cidr = derive_subnet_cidrs(vpc_cidr)
+        public_subnet_cidr, private_subnet_cidr, private_endpoint_subnet_cidr = derive_subnet_cidrs(
+            vpc_cidr, private_endpoints=private_link is not None
+        )
 
         network = {
             "vpc_cidr": vpc_cidr,
             "public_subnet_cidr": public_subnet_cidr,
             "private_subnet_cidr": private_subnet_cidr,
         }
+
+        if private_endpoint_subnet_cidr:
+            network["private_endpoint_subnet_cidr"] = private_endpoint_subnet_cidr
     elif network_strategy == "custom":
         vnet_id, _, subnet_ids = resolve_existing_vnet(normalized, deployment)
 
@@ -385,6 +531,9 @@ def build_tfvars_azure(normalized: dict, deployment: dict, inventory: dict) -> d
             deployment_network = deployment.get("network", {})
             network["public_subnet_cidr"] = deployment_network["public_subnet_cidr"]
             network["private_subnet_cidr"] = deployment_network["private_subnet_cidr"]
+
+            if private_link:
+                network["private_endpoint_subnet_cidr"] = deployment_network["private_endpoint_subnet_cidr"]
     else:
         raise ValueError(
             f"network.strategy '{network_strategy}' is not supported for "
@@ -428,6 +577,9 @@ def build_tfvars_azure(normalized: dict, deployment: dict, inventory: dict) -> d
 
     if compliance_standards:
         tfvars["compliance_standards"] = compliance_standards
+
+    if private_link:
+        tfvars["private_link"] = private_link
 
     # Optional: account-level network policy / shared audit-log
     # destination to attach (CLAUDE.md §10 backlog item #1a / §8

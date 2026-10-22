@@ -149,6 +149,13 @@
           }
         },
 
+        "existing_private_dns_zone_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+
         "existing_subnet_ids": {
           "type": "array",
           "items": {

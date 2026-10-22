@@ -354,6 +354,7 @@ def resolve_configuration(
         "existing_security_group_id",
         "existing_route_table_ids",
         "existing_subnet_ids",
+        "existing_private_dns_zone_ids",
     ):
         if key in request_network:
             network[key] = request_network[key]

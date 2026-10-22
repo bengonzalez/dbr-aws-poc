@@ -55,6 +55,9 @@ variable "network" {
     existing_vnet_id           = optional(string)
     existing_public_subnet_id  = optional(string)
     existing_private_subnet_id = optional(string)
+
+    # Private Link's private-endpoint subnet (CLAUDE.md §8 milestone 46).
+    private_endpoint_subnet_cidr = optional(string)
   })
 }
 
@@ -157,4 +160,22 @@ variable "tags" {
   description = "Tags applied to every resource this root creates."
   type        = map(string)
   default     = {}
+}
+
+variable "private_link" {
+  description = "Classic (back-end) Private Link (CLAUDE.md §8 milestone 46). enabled = true switches the workspace to NoAzureDatabricksRules and adds databricks_ui_api + DBFS dfs/blob private endpoints in network.private_endpoint_subnet_cidr's subnet. existing_private_dns_zone_ids (keys databricks/dfs/blob) uses client hub zones instead of creating and linking per-workspace ones."
+  type = object({
+    enabled = bool
+    existing_private_dns_zone_ids = optional(object({
+      databricks = string
+      dfs        = string
+      blob       = string
+    }))
+  })
+  default = { enabled = false }
+
+  validation {
+    condition     = !var.private_link.enabled || var.network.private_endpoint_subnet_cidr != null
+    error_message = "private_link.enabled needs network.private_endpoint_subnet_cidr."
+  }
 }

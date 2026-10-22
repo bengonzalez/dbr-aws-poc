@@ -7,6 +7,7 @@ module "deployment" {
   ownership                  = var.ownership
   network                    = var.network
   encryption                 = var.encryption
+  private_link               = var.private_link
   tags                       = local.common_tags
   compliance_standards       = var.compliance_standards
   log_analytics_workspace_id = var.log_analytics_workspace_id

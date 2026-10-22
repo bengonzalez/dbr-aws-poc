@@ -97,7 +97,7 @@ resource "azurerm_subnet" "public" {
       # All three listed, not just join - Azure adds the two
       # prepare/unprepareNetworkPolicies actions itself, so declaring only
       # join shows as permanent drift on every plan (found on the first
-      # real custom-strategy apply, CLAUDE.md ง8 milestone 41).
+      # real custom-strategy apply, CLAUDE.md ยง8 milestone 41).
       actions = [
         "Microsoft.Network/virtualNetworks/subnets/join/action",
         "Microsoft.Network/virtualNetworks/subnets/prepareNetworkPolicies/action",
@@ -123,7 +123,7 @@ resource "azurerm_subnet" "private" {
       # All three listed, not just join - Azure adds the two
       # prepare/unprepareNetworkPolicies actions itself, so declaring only
       # join shows as permanent drift on every plan (found on the first
-      # real custom-strategy apply, CLAUDE.md ง8 milestone 41).
+      # real custom-strategy apply, CLAUDE.md ยง8 milestone 41).
       actions = [
         "Microsoft.Network/virtualNetworks/subnets/join/action",
         "Microsoft.Network/virtualNetworks/subnets/prepareNetworkPolicies/action",
@@ -131,6 +131,19 @@ resource "azurerm_subnet" "private" {
       ]
     }
   }
+}
+
+# Dedicated subnet for Private Link endpoints (CLAUDE.md ยง8 milestone 46) -
+# no Databricks delegation, since private endpoints can't share a
+# delegated subnet. Created in either VNet shape (new or client-provided);
+# adopted-subnet workspaces don't get one (rejected upstream).
+resource "azurerm_subnet" "private_endpoints" {
+  count = var.private_endpoint_subnet_cidr != null ? 1 : 0
+
+  name                 = local.create_vnet ? "private-endpoints" : "${var.workspace_name}-private-endpoints"
+  resource_group_name  = local.vnet_resource_group_name
+  virtual_network_name = local.vnet_name
+  address_prefixes     = [var.private_endpoint_subnet_cidr]
 }
 
 resource "azurerm_subnet_network_security_group_association" "public" {

@@ -100,3 +100,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "private_endpoint_subnet_cidr" {
+  description = "CIDR for a dedicated private-endpoint subnet (Private Link, CLAUDE.md §8 milestone 46). Null (default) creates none."
+  type        = string
+  default     = null
+}

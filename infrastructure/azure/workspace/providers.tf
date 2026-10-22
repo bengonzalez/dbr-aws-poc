@@ -40,6 +40,6 @@ provider "databricks" {
   # home tenant differs from this subscription's), the SDK's discovery
   # requests a token from the HOME tenant, which the account rejects with
   # "Expected iss claim to be: https://sts.windows.net/<this tenant>/"
-  # (found standing up the real account, CLAUDE.md ง8 milestone 44).
+  # (found standing up the real account, CLAUDE.md ยง8 milestone 44).
   azure_tenant_id = data.azurerm_client_config.current.tenant_id
 }

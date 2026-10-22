@@ -127,4 +127,12 @@ resource "databricks_external_location" "this" {
   url             = "abfss://${azurerm_storage_data_lake_gen2_filesystem.unity_catalog_data.name}@${azurerm_storage_account.unity_catalog_data.name}.dfs.core.windows.net/"
   credential_name = databricks_storage_credential.this.name
   comment         = "Managed by Terraform for workspace ${var.workspace_name}."
+
+  # Lets destroy drop the location while Unity Catalog still counts a
+  # recently-dropped managed table under it (retained for undrop) - its
+  # storage is destroyed by this same Terraform anyway. Live data is
+  # guarded earlier: a non-empty catalog stops resolver/teardown.py before
+  # this point (CLAUDE.md §8 milestone 46; same reasoning as the storage
+  # credential's force_destroy, milestone 34).
+  force_destroy = true
 }
