@@ -144,7 +144,7 @@ requirements, security controls, Terraform behavior.
 | `normalized/<provider>/*.yaml` | Working — **was silently gitignored, now fixed** | Resolver output per workspace request. `CLAUDE.md` previously (incorrectly) stated these were committed; `.gitignore` actually had a stale `normalized/` rule (its own comment called it "the normalized **virtual environment** directory," which doesn't match what's in there) that had been silently excluding every file in this directory from version control. Removed 2026-10-09 — these now will be tracked going forward. Cloud-scoped under `<provider>/` as of §8 milestone 36 (was flat `normalized/*.yaml`) — a workspace name is conventionally unique per provider, not globally; `resolver/loader.py::resolve_normalized_path()` auto-detects which provider's subdirectory a `--workspace` name lives under, erroring clearly if it exists under more than one. |
 | `infrastructure/aws/workspace/*.tf` | **One shared root for every workspace** (§8 milestone 12 — supersedes the per-directory approach from milestone 10) | `providers.tf`/`versions.tf` (the latter has a partial `backend "s3" {}` block — bucket/key/region supplied at `init` time, since Terraform backend blocks can't contain variables), `variables.tf`, `main.tf` (a single `module "deployment"` call into `modules/aws/workspace-deployment`), `outputs.tf` (forwards). No per-workspace copies of any of this — every workspace uses these exact same files; only the `-var-file` and the backend-config differ per workspace. |
 | `infrastructure/aws/workspace/backend.tfbackend` | **Working** (§8 milestone 13) | Committed, idempotently rewritten every time `generate_backend_config.py` runs for *any* workspace: `bucket`/`region`/`use_lockfile` — identical for every workspace, so this stays a single shared file instead of being repeated in each per-workspace backend-config file. Never hand-edit. |
-| `infrastructure/aws/account/*.tf` | **New, §8 milestone 39, plan-verified only** | A *second* AWS Terraform root, sibling to `infrastructure/aws/workspace/` — one per Databricks account, not one per workspace, applied independently of any workspace's lifecycle. Composes the three `modules/aws/account-*` modules below behind independent boolean toggles, all defaulting `false` (a no-op until an operator opts in — see §5/§10 backlog item #1). Same partial `backend "s3" {}` + `databricks.mws`-aliased provider shape as the workspace root, but `backend.tfbackend` here is a single hand-written, committed file (no generator script — there's no per-workspace multiplicity to justify one) and inputs come from a plain, hand-written `infrastructure/deployments/aws/account/<databricks_account_id>/terraform.tfvars.json` rather than the resolver pipeline (this isn't workspace-request-driven). `local.auto.tfvars`(gitignored)/`local.auto.tfvars.example`(committed) hold `databricks_profile`, same convention as the workspace root. |
+| `infrastructure/aws/account/*.tf` | **New, §8 milestone 39; applied for real against the TSA account §8 milestone 47 (legacy features + audit log delivery; network policy blocked by the Enterprise tier)**, originally plan-verified only** | A *second* AWS Terraform root, sibling to `infrastructure/aws/workspace/` — one per Databricks account, not one per workspace, applied independently of any workspace's lifecycle. Composes the three `modules/aws/account-*` modules below behind independent boolean toggles, all defaulting `false` (a no-op until an operator opts in — see §5/§10 backlog item #1). Same partial `backend "s3" {}` + `databricks.mws`-aliased provider shape as the workspace root, but `backend.tfbackend` here is a single hand-written, committed file (no generator script — there's no per-workspace multiplicity to justify one) and inputs come from a plain, hand-written `infrastructure/deployments/aws/account/<databricks_account_id>/terraform.tfvars.json` rather than the resolver pipeline (this isn't workspace-request-driven). `local.auto.tfvars`(gitignored)/`local.auto.tfvars.example`(committed) hold `databricks_profile`, same convention as the workspace root. |
 | `modules/aws/account-legacy-features/`, `modules/aws/account-network-policy/`, `modules/aws/account-audit-log-delivery/` | **New, §8 milestone 39, plan-verified against the real Databricks account-console API** | Account-scoped Databricks-provider modules, one per concern (mirrors SRA's own `databricks_account/*` split). `account-legacy-features`: one resource, `databricks_disable_legacy_features_setting` — distinct from `modules/aws/workspace-hardening`'s workspace-scoped `disable_legacy_access`/`disable_legacy_dbfs` (§8 milestone 38); likely a one-way lock once enabled, same as those. `account-network-policy`: `databricks_account_network_policy`, full SRA shape (egress restriction + ingress IP ACL/cross-workspace/private-access) — real finding (not SRA's older comments, the provider's own current docs): the egress restriction governs *serverless* workloads only, no effect on this factory's classic compute, so the real lockout risk is entirely on the ingress IP-ACL side. `account-audit-log-delivery`: the full SRA chain (S3 bucket, IAM role/policy, `databricks_mws_credentials`/`_storage_configurations`/`_log_delivery`). None of the three are wired into any workspace automatically — `network_policy_id` is the one value a workspace can opt into, via `platform/inventory/aws.yaml` + `resolver/inventory.py::resolve_network_policy_id()`, same auto-lookup pattern as `metastore_id`. |
 | `infrastructure/azure/workspace/*.tf` | **New, §8 milestone 35** | Azure's shared root, parallel sibling to `infrastructure/aws/workspace/` — same one-shared-root-per-cloud convention, not merged into the AWS root (the `azurerm`/`databricks` provider blocks are irreconcilable with AWS's `aws` provider block). `providers.tf` defines the `azurerm` provider (no explicit subscription id — derived from whichever `az` CLI session is active, same posture as the AWS root never passing an explicit account id to its own `aws` provider) plus an *aliased* `databricks` provider (`alias = "workspace"`, `host = "https://${module.deployment.workspace_url}"`, `auth_type = "azure-cli"`) — this provider has to live in the root rather than inside `module.deployment` itself, since Terraform does not allow a non-root module to define a provider block that references a resource it creates; that's also why this root composes Unity Catalog directly (`module.unity_catalog_data`/`module.unity_catalog_workspace`) rather than nesting that composition inside `module.deployment` the way the AWS root does. `backend "azurerm" {}` is partial, configured at `init` time via `-backend-config`, mirroring the AWS root's partial S3 backend exactly. `locals.tf` derives a valid (<=24-char, lowercase-alphanumeric) ADLS Gen2 storage account name from the workspace name plus a slice of `data.azurerm_client_config.current.subscription_id` — not guaranteed globally unique across tenants, a known, accepted limitation for this pass. As of §8 milestone 40, this root also defines a *second* aliased `databricks` provider (`alias = "mws"`, account-console host/`account_id`) purely to support an optional `databricks_workspace_network_option` resource — that resource's own docs require an account-level provider, unlike every other Databricks resource here, which uses the workspace-scoped one. |
 | `infrastructure/azure/workspace/backend.tfbackend` | **Working, §8 milestones 35/36** | Azure's analog of the AWS root's shared backend file — `resource_group_name`/`storage_account_name`/`container_name` instead of `bucket`/`region`/`use_lockfile`. The Azure Storage Account (`sttfstate2539d6cd`, resource group `rg-databricks-tfstate`) was created for real via `az` CLI in milestone 36 — same "pre-existing, manually-managed" posture as AWS's `beng-tfstatefiles` bucket. |
@@ -3945,6 +3945,50 @@ Priority order agreed on:
       without `encoding="utf-8"`. Repaired byte-precisely (only the
       invalid bytes re-decoded), and a whole-repo UTF-8 scan is clean.
 
+47. **AWS account root applied for real — closes §10 item #1**
+    (2026-10-22). The committed deployment
+    (`infrastructure/deployments/aws/account/331f8702-.../`, the AWS
+    inventory's default account) couldn't be used: every CLI profile for
+    that account is invalid. The user chose the **TSA** account
+    (`eddbb85f-6b3c-4261-8ca2-0d9d62575ce2`), the one every recent AWS
+    workspace ran on, with a valid `TSA` profile. A new
+    `infrastructure/deployments/aws/account/eddbb85f-.../` sits alongside
+    the untouched 331f one. The user chose all three toggles.
+    - **Read first**: TSA already had legacy features disabled (same
+      newer-account default found on Azure in milestone 44). It had only
+      the built-in `default-policy`, no log delivery, and one
+      pre-existing workspace (`workspace`, not managed by this factory).
+      Account-wide audit delivery now captures that workspace's logs too.
+    - **Applied: 11 of 12 on the first try.**
+      - Legacy-features setting (manages the existing `true`).
+      - The full audit-log chain: S3 bucket
+        `databricks-platform-audit-log-delivery` (public-access block,
+        policy, versioning), IAM role + policy, the IAM propagation
+        sleep, then `databricks_mws_credentials`, storage configuration
+        and `databricks_mws_log_delivery` (`AUDIT_LOGS`, JSON, prefix
+        `audit-logs`, status `ENABLED`). The 10s IAM sleep was enough
+        this time; no credential retry was needed, unlike several
+        workspace applies (§4a).
+    - **Real limitation, not fixable in code**: the network policy failed
+      with *"Network policy management is restricted to Enterprise-tier
+      accounts."* That's the same wall as AWS PrivateLink (§5.11).
+      `enable_network_policy` is set back to `false` in the committed
+      tfvars; one output-only apply cleared the stale
+      `network_policy_id` output, and the plan is now **No changes**
+      (`-detailed-exitcode` 0). The milestone-44 ingress fix wasn't
+      exercised on AWS, since the tier check fires first.
+    - **First delivery not yet observed** at the time of writing: the
+      configuration reports `CREATED` ("updated after the first delivery
+      attempt") and the bucket is still empty. Databricks delivers audit
+      logs periodically, so check `aws s3 ls
+      s3://databricks-platform-audit-log-delivery/audit-logs/
+      --recursive` later.
+    - **Teardown note for this root**: Databricks log delivery
+      configurations can't be deleted, only disabled, so a `terraform
+      destroy` here would disable the config, not remove it.
+      `resolver/teardown.py` is per-workspace and doesn't cover account
+      roots.
+
 ## 9. Conventions observed (keep consistent)
 
 - Every top-level cloud-specific location is grouped under a `<cloud>/`
@@ -4070,16 +4114,13 @@ not a hard mandate — re-prioritize anytime, but update this list when
 you do, and cross an item off (move it to a §8 milestone) rather than
 deleting it silently.
 
-1. **Account-level/shared-state SRA features — AWS done, see §8
-   milestone 39.** `infrastructure/aws/account/` now builds all three
-   (`disable_legacy_features` at the account level, an account network
-   policy via `databricks_account_network_policy`, and audit log
-   delivery via `databricks_mws_log_delivery`), all independently
-   toggled and defaulting off, plan-verified against the real
-   Databricks account-console API. **Still open**: Azure's equivalent
-   (see new item #1a below) and a real `terraform apply` of any of the
-   three against a live Databricks account (a separate, explicit
-   go/no-go per milestone 39's own writeup).
+1. ~~**Account-level/shared-state SRA features (AWS)**~~ — **applied
+   for real, see §8 milestones 39/47.** On the TSA account
+   (`eddbb85f-...`): legacy features (already disabled) and audit log
+   delivery are Terraform-managed. **Only remaining piece**: the account
+   network policy, which needs an **Enterprise-tier** Databricks account,
+   the same wall as AWS PrivateLink (§5.11). Revisit only if an
+   Enterprise account becomes available.
 1a. **Azure account-level equivalent — real account stood up, see §8
    milestones 40/44.** Account `8fba155f-...` (BenAvanade tenant). The
    shared audit-log destination is applied and is the inventory default.
