@@ -137,6 +137,7 @@ requirements, security controls, Terraform behavior.
 | `resolver/validate_deployment_azure.py` | **New, §8 milestone 43, live-verified** | Azure checks for the post-apply validation harness, dispatched from `validate_deployment.py` (which now auto-detects the provider via `loader.resolve_normalized_path()`, with an optional `--provider`). It shares that module's statuses, report, evidence and blocking logic. It authenticates through the active `az login` (no `--profile`), so the Unity Catalog catalog check always runs. Checks: workspace provisioning; VNet injection + no public IP (+ the client VNet for `custom`); all three workspace CMKs plus brought-key identity; the UC storage account's key; the metastore; catalog isolation and storage root; the compliance security profile; and centralized audit logging via the per-workspace diagnostic setting. It refuses to run if the shared root is initialized for a different workspace. |
 | `resolver/teardown.py` | **New, §8 milestone 45; live-verified on both clouds (AWS §8 milestone 49)** | `--workspace <name> [--provider] [--yes] [--purge-files]`. Destroys one workspace, including every step a plain `terraform destroy` misses: it inits the right backend itself, `state rm`s the one-way-locked legacy settings, retries known-transient destroy failures, and on Azure deletes the orphaned Databricks-managed resource group. On AWS it stops (with manual steps) on a non-empty S3 bucket or the UC storage-credential lock rather than deleting data. `--purge-files` also removes the empty state object and the generated local files (never the request). |
 | `ci/pipeline.py`, `.gitlab-ci.yml`, `Jenkinsfile`, `ci/README.md` | **New, §8 milestone 48; driver live-verified locally, wrappers not yet run in a real GitLab/Jenkins** | CI for both client toolchains: GitLab for AWS, Jenkins for Azure. `ci/pipeline.py` holds every real step (`changed`/`prepare`/`verify`/`plan`/`apply`). The two wrappers only handle triggers on `workspace-requests/<cloud>/**`, workload identity federation, the manual approval gate and artifacts. `ci/README.md` is the one-time identity setup for each. |
+| `client-vpc-handoff-template.yaml` | **New, 2026-10-26; template only, not consumed by code yet** | Client-facing form for the network a client builds themselves (the Notion "VPC Created by client" spec): VPC, per-AZ edge/compute/backend subnets, private NATs, route tables, TGW, existing endpoints, plus egress/DNS questions. See §10 item #15 for the field mapping and the code changes needed to consume it. |
 | `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. `workspace-request.schema.json` gained optional `network.connectivity` (§8 milestone 27); `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` (§8 milestone 28); and, §8 milestone 29, `network.existing_security_group_id`, a new top-level `encryption` object (`existing_workspace_storage_key_arn`/`_alias`, `existing_managed_services_key_arn`/`_alias` — the first requester-controlled `encryption` fields; `encryption.workspace`/`application_data` stay entirely profile-derived), `governance.existing_metastore_id` (alongside the milestone-22 `catalog_admin_principal` — the first two requester-controlled `governance` fields), and `cloud.databricks_account_id`. All mirrored into `normalized-config.schema.json` too. The latter's now-dead `network.requirements.subnets.allocation` sub-schema (count/AZs/cidr_source — superseded by real auto-allocation, §8 milestone 28) was removed. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. As of §8 milestone 35, `cloud.provider`'s enum gained `"azure"` (both schemas) and `normalized-config.schema.json`'s `cloud.account` pattern was relaxed to accept either a 12-digit AWS account id or a UUID-shaped Azure subscription id - no other schema change was needed since `network.vpc_cidr`/`governance.catalog_admin_principal`/etc. were already cloud-agnostic strings with no AWS-specific pattern. |
 | `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely — `policies/network.yaml`'s `allowed_strategies` is now the only thing with an opinion on network strategy per environment (§8 milestone 16). |
 | `policies/policies.yaml` | Working | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping + per-environment `allowed_strategies`, validation blocking per env), one key per domain (`network_policy`, `security_policy`, `data_policy`, `governance_policy`, `validation_policy`). Trimmed to only the fields `resolver.py` actually reads (§8 milestone 15), gained `network_policy.allowed_strategies` (§8 milestone 16), then merged from five separate files into this one 2026-10-14 (§8 milestone 18 — closes §5.13's config-layer complexity review). |
@@ -4111,6 +4112,56 @@ Priority order agreed on:
       storage-credential stop branches weren't hit (empty buckets, no
       lock).
 
+50. **AWS Unity Catalog destroy order: the orphaned external location
+    fixed** (2026-10-26). Root cause of the orphan in milestones 36/49:
+    `databricks_metastore_assignment` lived in `unity-catalog-workspace`,
+    which depends on `unity-catalog-data`, so destroy unassigned the
+    metastore **before** deleting the external location and its
+    bindings. Those workspace-level deletes then got "not found", which
+    the provider treats as success. So the location left state but stayed
+    in the metastore, and the next deploy failed with "already exists".
+    - **Fix**: the assignment moved up into
+      `modules/aws/workspace-deployment` (`count`-gated on
+      `governance.unity_catalog`, with a `moved` block from the old
+      address), and both UC modules `depends_on` it, so destroy removes
+      it last.
+    - `resolver/teardown.py` now waits before each retry
+      (`RETRY_DELAY_SECONDS`). 30s was too short: "network still attached
+      to a workspace" came back on attempts 1 and 2 and only cleared on
+      the last one. At **60s** it cleared on the second attempt.
+    - **Verified on TSA** with AWS `isolated-proof`:
+      - **Leftover state**: an earlier session had already applied the
+        new code and stopped partway through UC, so the workspace was
+        live with the assignment at its new address. The remaining 4 UC
+        resources applied cleanly.
+      - **Fix proven**: torn down with the new code, then redeployed
+        from scratch (48 to add). The external location was created with
+        **no "already exists" error**, so the teardown left no orphan.
+      - Validator: **5 PASS** (including `governance.unity_catalog.catalog`
+        via a new workspace profile, `isolated-proof-ws-aws4`), 1 N/A,
+        1 NOT_IMPLEMENTED.
+      - Torn down again: 23 destroyed, one "StorageConfiguration still
+        attached" retry. No NAT Gateway or workspace left.
+      - **Not exercised**: the `moved` block against a state built by
+        the old code. No AWS workspace was live on the old layout, so
+        nothing currently needs it.
+    - **New finding: Unity Catalog IAM propagation can take around 15
+      minutes.** On the redeploy, `databricks_external_location` failed
+      for about 15 minutes with *"AWS IAM role does not have READ
+      permissions on url s3://...-uc/"*. The UC role, trust policy,
+      permissions policy and bucket were all correct, and replacing the
+      storage credential didn't help. CloudTrail showed no AssumeRole
+      call against the UC role at all in that window. Then `databricks
+      storage-credentials validate` (needs a workspace profile) passed
+      every check, and a plain re-plan/apply succeeded. The module's 60s
+      `time_sleep` isn't enough when this happens; milestone 49 didn't
+      hit it.
+      **If it recurs: don't change code.** Wait, run `validate`, and
+      re-apply once it passes. Making the wait longer (or polling
+      `validate` before creating the location) is a possible follow-up.
+      Note that replacing the credential (`-replace`) **drops its
+      workspace binding**; a normal re-plan recreates it.
+
 ## 9. Conventions observed (keep consistent)
 
 - Every top-level cloud-specific location is grouped under a `<cloud>/`
@@ -4343,3 +4394,91 @@ deleting it silently.
     - teardown from CI for deleted requests;
     - one job per workspace (dynamic child pipelines / parallel stages);
     - a shared pipeline image.
+15. **Consume a client-built "TSA-shape" VPC (AWS)** (raised 2026-10-26).
+    The client builds the whole network themselves, to the spec in the
+    Notion page's "VPC Created by client" table, and hands it over with
+    `client-vpc-handoff-template.yaml` (repo root, client-facing, one
+    filled copy per workspace). The shape:
+    - a routable `/27` primary CIDR plus `100.64.0.0/19` secondary;
+    - per AZ (x2): a `/28` edge subnet with a private NAT, a `/21`
+      compute subnet, and a `/26` backend subnet;
+    - a TGW attachment in the edge subnets;
+    - four route tables: compute x2 (S3 endpoint + `0.0.0.0/0` to the
+      same-AZ NAT), edge (to the TGW) and backend (local only);
+    - an existing S3 gateway endpoint.
+    The factory must create **no** network plumbing here: only the
+    workspace security group, interface endpoints that don't exist yet,
+    and everything non-network (IAM, S3, KMS, UC, workspace).
+
+    **Field mapping** (handoff → request; deployment-file overrides still
+    win, as for every `existing_*` field):
+    - `vpc.id` → `network.existing_vpc_id`
+    - `vpc.primary_cidr` → `network.existing_vpc_cidr`. The secondary
+      CIDR is informational only: adopted subnets skip allocation and the
+      collision checker. The same `100.64.0.0/19` is reused in every
+      client VPC, so it must never be fed to `check_cidr_allocations.py`.
+    - `availability_zones[*].compute_subnet.id` →
+      `network.existing_subnet_ids` (milestone 33); the Databricks
+      compute subnets. `/21` is inside Databricks' allowed `/17`-`/26`.
+    - `availability_zones[*].compute_subnet.route_table_id` →
+      `network.existing_route_table_ids`, same order
+    - `databricks.account_id` → `cloud.databricks_account_id`
+    - `databricks.enterprise_tier: false` → `network.connectivity` must
+      not be `privatelink`. Egress then goes through the client's
+      NAT/TGW, not a factory NAT (already the case: NAT only builds when
+      Terraform owns the VPC, milestone 27).
+    - Edge subnets, NAT gateways, TGW, edge/backend route tables: not
+      consumed by Terraform. Keep them for validation and evidence only.
+
+    **Code changes needed** (all in the AWS path, none built yet):
+    1. **Don't associate route tables we don't own.**
+       `modules/aws/workspace-network`'s `aws_route_table_association.private`
+       always has `count = subnet_count`. With adopted subnets *and*
+       adopted route tables, the client's subnets are already associated,
+       and creating the association fails
+       (`Resource.AlreadyAssociated`). Skip the associations when both
+       are existing; at most, check the association with a data source
+       postcondition. Milestone 33 never hit this because its adoption
+       test was plan-only; the conflict only shows at apply.
+    2. **Per-endpoint existing-or-create.** `endpoints_ownership` is all
+       or nothing today. `"terraform"` would add a second S3 gateway
+       endpoint to the compute route tables, which conflicts with the
+       client's. Add `existing_s3_gateway_endpoint_id` (skip `aws_vpc_endpoint.s3`),
+       and likewise STS/KMS interface ids, to `modules/aws/workspace-endpoints`
+       and the request schema (`network.existing_*_endpoint_id`).
+    3. **Put interface endpoints in the backend subnets.** New request
+       field `network.existing_endpoint_subnet_ids` (the two backend
+       subnets) and a module input `interface_endpoint_subnet_ids`,
+       defaulting to the compute subnets. Use it for STS/KMS in
+       `workspace-endpoints` and for both endpoints in
+       `workspace-privatelink`. This replaces §7's "PrivateLink shares
+       the compute subnets" simplification for this shape; the backend
+       tier is SRA's "intra" subnet tier.
+    4. **Existing Databricks PrivateLink endpoints** (only if the client
+       runs them centrally): accept `existing_*_endpoint_id` for REST API
+       and SCC relay and register those with `databricks_mws_vpc_endpoint`
+       instead of creating AWS endpoints.
+    5. **Plan-time VPC checks.** Add a `data.aws_vpc.existing`
+       postcondition for `enable_dns_support`/`enable_dns_hostnames`.
+       Milestone 32 hit this only at apply time.
+    6. **Handoff → request conversion.** Start by hand-copying fields
+       into `workspace-requests/aws/<env>/<name>.yaml`. Once the shape
+       stops changing, consider `resolver/import_client_handoff.py`: read
+       the filled handoff, check it against live AWS with read-only
+       `describe-*` calls (CIDRs, AZs, route table associations, the
+       compute default route targeting the same-AZ NAT, DNS attributes)
+       and write the request. Keep filled handoffs under
+       `client-handoffs/aws/<env>/<name>.yaml` (not under
+       `workspace-requests/`, which is the CI trigger path).
+    7. **Validator**: `network.required` could additionally confirm the
+       workspace's network uses the handed-over compute subnets.
+
+    **Open questions for the client** (also in the template): whether
+    the egress path behind the TGW allows the Databricks control plane;
+    whether the Databricks account is Enterprise; the DNS resolver; and
+    whether one VPC serves exactly one workspace (the per-VPC unique
+    `/27` suggests yes).
+    **Verify end to end** like milestone 32: build a throwaway VPC of
+    exactly this shape in `556940913059` (TGW optional; a private NAT
+    needs no TGW to be created), deploy through the pipeline, run the
+    validator, tear down.

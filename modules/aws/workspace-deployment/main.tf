@@ -233,6 +233,30 @@ resource "databricks_mws_workspaces" "this" {
 # real, created workspace ID.
 # ---------------------------------------------------------------------------
 
+# Assigns the existing, platform-owned metastore to this workspace. Not
+# automatic: two unrelated pre-existing workspaces checked during design
+# (different regions) confirmed assignment doesn't happen on its own.
+#
+# Both Unity Catalog modules depend on this, so destroy removes it last.
+# It used to live inside unity_catalog_workspace, which depends on
+# unity_catalog_data, so destroy unassigned the metastore *before*
+# deleting the external location and its bindings. Those workspace-level
+# deletes then got "not found", which the provider treats as success: the
+# location left state but stayed in the metastore, and blocked the next
+# deploy with "already exists" (CLAUDE.md §8 milestones 36/49/50).
+resource "databricks_metastore_assignment" "this" {
+  count    = var.governance.unity_catalog ? 1 : 0
+  provider = databricks.mws
+
+  metastore_id = var.existing_metastore_id
+  workspace_id = databricks_mws_workspaces.this.workspace_id
+}
+
+moved {
+  from = module.unity_catalog_workspace[0].databricks_metastore_assignment.this
+  to   = databricks_metastore_assignment.this[0]
+}
+
 module "unity_catalog_data" {
   count  = var.governance.unity_catalog ? 1 : 0
   source = "../unity-catalog-data"
@@ -251,6 +275,10 @@ module "unity_catalog_data" {
   encryption_customer_managed = var.encryption.application_data == "customer_managed"
 
   tags = local.common_tags
+
+  depends_on = [
+    databricks_metastore_assignment.this
+  ]
 }
 
 module "unity_catalog_workspace" {
@@ -269,6 +297,7 @@ module "unity_catalog_workspace" {
   catalog_admin_principal = var.catalog_admin_principal
 
   depends_on = [
+    databricks_metastore_assignment.this,
     module.unity_catalog_data
   ]
 }

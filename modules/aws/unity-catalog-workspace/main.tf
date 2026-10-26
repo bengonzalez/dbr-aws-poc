@@ -1,13 +1,7 @@
 
-# Assigns the existing, platform-owned metastore to this workspace. Not
-# automatic: two unrelated pre-existing workspaces checked during design
-# (different regions) confirmed assignment doesn't happen on its own.
-resource "databricks_metastore_assignment" "this" {
-  provider = databricks.mws
-
-  metastore_id = var.existing_metastore_id
-  workspace_id = var.databricks_workspace_id
-}
+# The metastore assignment lives in modules/aws/workspace-deployment, not
+# here, so it's destroyed after every Unity Catalog object (CLAUDE.md §8
+# milestone 50). The caller makes this module depend on it.
 
 # A dedicated, isolated catalog per workspace - always isolated regardless
 # of environment (see CLAUDE.md Sec8's Unity Catalog milestone for why
@@ -25,10 +19,6 @@ resource "databricks_catalog" "this" {
   provider_config {
     workspace_id = var.databricks_workspace_id
   }
-
-  depends_on = [
-    databricks_metastore_assignment.this
-  ]
 }
 
 # Makes this catalog the default for the workspace, so SQL users don't need

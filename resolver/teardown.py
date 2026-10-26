@@ -40,6 +40,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 from loader import load_yaml, resolve_normalized_path
 
@@ -59,6 +60,11 @@ TRANSIENT_PATTERNS = (
 )
 
 MAX_DESTROY_ATTEMPTS = 3
+
+# Pause before a retry. Every retry so far was propagation lag (e.g. a
+# just-deleted workspace still "attached"), which an immediate retry can
+# hit again (CLAUDE.md §8 milestone 50).
+RETRY_DELAY_SECONDS = 60
 
 
 class TeardownError(RuntimeError):
@@ -218,7 +224,8 @@ def destroy(root: Path, var_file: str, provider: str) -> None:
         ]
 
         if attempt < MAX_DESTROY_ATTEMPTS and transient:
-            log(f"known transient failure - retrying: {transient[0]}")
+            log(f"known transient failure - retrying in {RETRY_DELAY_SECONDS}s: {transient[0]}")
+            time.sleep(RETRY_DELAY_SECONDS)
             continue
 
         errors = "\n".join(line for line in output.splitlines() if "Error" in line) or output[-2000:]
