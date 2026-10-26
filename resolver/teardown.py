@@ -59,7 +59,7 @@ TRANSIENT_PATTERNS = (
     r"dial tcp .*(connection attempt failed|i/o timeout)",
 )
 
-MAX_DESTROY_ATTEMPTS = 3
+MAX_DESTROY_ATTEMPTS = 5
 
 # Pause before a retry. Every retry so far was propagation lag (e.g. a
 # just-deleted workspace still "attached"), which an immediate retry can

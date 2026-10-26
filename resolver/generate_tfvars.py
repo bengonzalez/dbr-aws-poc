@@ -24,6 +24,21 @@ from generate_tfvars_azure import main_azure as _main_azure
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# Client-owned VPC endpoints and the subnets to put new endpoints in
+# (CLAUDE.md §10 item #15). Each is a deployment.yaml network.* override >
+# the request's network.* value, forwarded as its own tfvars key.
+ENDPOINT_PASSTHROUGH_KEYS = (
+    "existing_endpoint_subnet_ids",
+    "existing_s3_gateway_endpoint_id",
+    "existing_sts_endpoint_id",
+    "existing_kms_endpoint_id",
+)
+
+
+def endpoint_passthrough(normalized: dict, deployment: dict, key: str):
+    return deployment.get("network", {}).get(key) or normalized["network"].get(key)
+
+
 KMS_PASSTHROUGH_KEYS = (
     "existing_workspace_storage_key_arn",
     "existing_workspace_storage_key_alias",
@@ -95,7 +110,15 @@ def resolve_network_ownership(
             else "terraform"
         )
 
-    endpoints_ownership = overrides.get("endpoints_ownership") or routing_ownership
+    # Naming endpoint subnets (a client's backend tier) means "put any
+    # missing endpoints there", even when routing is client-owned
+    # (CLAUDE.md §10 item #15).
+    if endpoint_passthrough(normalized, deployment, "existing_endpoint_subnet_ids"):
+        endpoints_default = "terraform"
+    else:
+        endpoints_default = routing_ownership
+
+    endpoints_ownership = overrides.get("endpoints_ownership") or endpoints_default
 
     return vpc_ownership, routing_ownership, endpoints_ownership
 
@@ -378,6 +401,7 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
         "existing_security_group_id",
         "existing_route_table_ids",
         "existing_subnet_ids",
+        *ENDPOINT_PASSTHROUGH_KEYS,
     ):
         network.pop(key, None)
 
@@ -484,6 +508,12 @@ def build_tfvars(normalized: dict, deployment: dict, inventory: dict) -> dict:
 
     if existing_subnet_ids is not None:
         tfvars["existing_subnet_ids"] = existing_subnet_ids
+
+    for key in ENDPOINT_PASSTHROUGH_KEYS:
+        value = endpoint_passthrough(normalized, deployment, key)
+
+        if value is not None:
+            tfvars[key] = value
 
     # Connectivity (PrivateLink vs NAT) only matters when Terraform owns
     # enough of the networking stack to act on it - and PrivateLink and

@@ -35,6 +35,12 @@ locals {
     local.create_routing ?
     aws_route_table.private[*].id : var.existing_route_table_ids
   )
+
+  # Adopted subnets with adopted route tables are already associated by
+  # the client; associating them again fails at apply
+  # (Resource.AlreadyAssociated). Check the association instead
+  # (CLAUDE.md §10 item #15).
+  manage_associations = local.create_subnets || local.create_routing
 }
 
 # ---------------------------------------------------------------------------
@@ -44,6 +50,15 @@ locals {
 data "aws_vpc" "existing" {
   count = local.create_vpc ? 0 : 1
   id    = var.existing_vpc_id
+
+  # Interface endpoints with private DNS fail at apply without both
+  # (CLAUDE.md §8 milestone 32), so catch it at plan time.
+  lifecycle {
+    postcondition {
+      condition     = self.enable_dns_support && self.enable_dns_hostnames
+      error_message = "Existing VPC ${var.existing_vpc_id} must have both DNS support and DNS hostnames enabled."
+    }
+  }
 }
 
 resource "aws_vpc" "this" {
@@ -99,10 +114,25 @@ resource "aws_route_table" "private" {
 }
 
 resource "aws_route_table_association" "private" {
-  count = local.subnet_count
+  count = local.manage_associations ? local.subnet_count : 0
 
   subnet_id      = local.subnet_ids[count.index]
   route_table_id = local.route_table_ids[count.index]
+}
+
+# Client-owned subnets and route tables: confirm each subnet is already
+# associated with the route table given for it, in the same order.
+data "aws_route_table" "adopted" {
+  count = local.manage_associations ? 0 : local.subnet_count
+
+  subnet_id = var.existing_subnet_ids[count.index]
+
+  lifecycle {
+    postcondition {
+      condition     = self.id == var.existing_route_table_ids[count.index]
+      error_message = "Subnet ${var.existing_subnet_ids[count.index]} is associated with ${self.id}, not ${var.existing_route_table_ids[count.index]}. List existing_route_table_ids in the same order as existing_subnet_ids."
+    }
+  }
 }
 
 # ---------------------------------------------------------------------------

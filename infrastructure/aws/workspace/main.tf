@@ -28,6 +28,10 @@ module "deployment" {
   vpc_cidr                          = var.vpc_cidr
   existing_security_group_id        = var.existing_security_group_id
   existing_subnet_ids               = var.existing_subnet_ids
+  existing_endpoint_subnet_ids      = var.existing_endpoint_subnet_ids
+  existing_s3_gateway_endpoint_id   = var.existing_s3_gateway_endpoint_id
+  existing_sts_endpoint_id          = var.existing_sts_endpoint_id
+  existing_kms_endpoint_id          = var.existing_kms_endpoint_id
   privatelink_enabled_override      = var.privatelink_enabled_override
   nat_enabled_override              = var.nat_enabled_override
   nat_subnet_cidr                   = var.nat_subnet_cidr

@@ -39,6 +39,30 @@ variable "enable_kms_endpoint" {
   default     = false
 }
 
+variable "interface_endpoint_subnet_ids" {
+  description = "Subnets to place interface endpoints in (e.g. a client's backend tier). Null places them in private_subnet_ids."
+  type        = list(string)
+  default     = null
+}
+
+variable "existing_s3_gateway_endpoint_id" {
+  description = "ID of an existing S3 gateway endpoint already attached to the compute route tables. Null creates one."
+  type        = string
+  default     = null
+}
+
+variable "existing_sts_endpoint_id" {
+  description = "ID of an existing STS interface endpoint in the VPC. Null creates one."
+  type        = string
+  default     = null
+}
+
+variable "existing_kms_endpoint_id" {
+  description = "ID of an existing KMS interface endpoint in the VPC. Null creates one (when enable_kms_endpoint)."
+  type        = string
+  default     = null
+}
+
 variable "tags" {
   description = "Tags for workspace endpoint resources."
   type        = map(string)

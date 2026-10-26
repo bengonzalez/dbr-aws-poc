@@ -24,6 +24,12 @@ variable "private_subnet_ids" {
   type        = list(string)
 }
 
+variable "endpoint_subnet_ids" {
+  description = "Subnets to place the PrivateLink endpoints in (e.g. a client's backend tier). Null places them in private_subnet_ids."
+  type        = list(string)
+  default     = null
+}
+
 variable "workspace_security_group_id" {
   description = "The workspace's compute security group, used as the ingress source for the PrivateLink security group."
   type        = string

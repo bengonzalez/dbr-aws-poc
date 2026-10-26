@@ -378,3 +378,27 @@ variable "tags" {
 
   default = {}
 }
+
+variable "existing_endpoint_subnet_ids" {
+  description = "Existing subnets (a client's backend tier) to place the interface and PrivateLink endpoints in. Null places them in the workspace subnets."
+  type        = list(string)
+  default     = null
+}
+
+variable "existing_s3_gateway_endpoint_id" {
+  description = "ID of an existing S3 gateway endpoint already attached to the workspace route tables. Null creates one (when endpoints are terraform-owned)."
+  type        = string
+  default     = null
+}
+
+variable "existing_sts_endpoint_id" {
+  description = "ID of an existing STS interface endpoint. Null creates one (when endpoints are terraform-owned)."
+  type        = string
+  default     = null
+}
+
+variable "existing_kms_endpoint_id" {
+  description = "ID of an existing KMS interface endpoint. Null creates one (when endpoints are terraform-owned and a customer-managed key is used)."
+  type        = string
+  default     = null
+}

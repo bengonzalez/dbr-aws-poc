@@ -217,6 +217,30 @@
           "description": "Azure only, with Private Link: full resource ids of existing hub private DNS zones for privatelink.azuredatabricks.net, privatelink.dfs.core.windows.net and privatelink.blob.core.windows.net (all three), used instead of per-workspace zones. Needed when several Private Link workspaces share a client VNet. Records are written into these zones, so the deployer needs rights on them."
         },
 
+        "existing_endpoint_subnet_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          },
+          "description": "AWS only. IDs of existing subnets (e.g. a client's backend tier) to place VPC interface endpoints and Databricks PrivateLink endpoints in. Optional - when present, the factory creates whichever endpoints aren't supplied below (existing_*_endpoint_id), in these subnets, even when the route tables are client-owned."
+        },
+
+        "existing_s3_gateway_endpoint_id": {
+          "type": "string",
+          "description": "AWS only. ID of an existing S3 gateway endpoint already attached to every route table in existing_route_table_ids. Optional - when present, no S3 gateway endpoint is created. Its policy must allow the workspace's S3 buckets."
+        },
+
+        "existing_sts_endpoint_id": {
+          "type": "string",
+          "description": "AWS only. ID of an existing STS interface endpoint in the VPC. Optional - when present, none is created."
+        },
+
+        "existing_kms_endpoint_id": {
+          "type": "string",
+          "description": "AWS only. ID of an existing KMS interface endpoint in the VPC. Optional - when present, none is created."
+        },
+
         "existing_subnet_ids": {
           "type": "array",
           "minItems": 2,

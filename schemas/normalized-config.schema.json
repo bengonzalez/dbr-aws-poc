@@ -156,6 +156,26 @@
           }
         },
 
+        "existing_endpoint_subnet_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+
+        "existing_s3_gateway_endpoint_id": {
+          "type": "string"
+        },
+
+        "existing_sts_endpoint_id": {
+          "type": "string"
+        },
+
+        "existing_kms_endpoint_id": {
+          "type": "string"
+        },
+
         "existing_subnet_ids": {
           "type": "array",
           "items": {

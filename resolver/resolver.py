@@ -355,6 +355,10 @@ def resolve_configuration(
         "existing_route_table_ids",
         "existing_subnet_ids",
         "existing_private_dns_zone_ids",
+        "existing_endpoint_subnet_ids",
+        "existing_s3_gateway_endpoint_id",
+        "existing_sts_endpoint_id",
+        "existing_kms_endpoint_id",
     ):
         if key in request_network:
             network[key] = request_network[key]

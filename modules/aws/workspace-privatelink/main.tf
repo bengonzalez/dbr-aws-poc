@@ -102,7 +102,7 @@ resource "aws_vpc_endpoint" "general_access" {
 
   service_name      = local.general_access_service_name
   vpc_endpoint_type = "Interface"
-  subnet_ids        = var.private_subnet_ids
+  subnet_ids        = coalesce(var.endpoint_subnet_ids, var.private_subnet_ids)
 
   security_group_ids = [
     aws_security_group.privatelink.id
@@ -120,7 +120,7 @@ resource "aws_vpc_endpoint" "scc_relay" {
 
   service_name      = local.scc_relay_service_name
   vpc_endpoint_type = "Interface"
-  subnet_ids        = var.private_subnet_ids
+  subnet_ids        = coalesce(var.endpoint_subnet_ids, var.private_subnet_ids)
 
   security_group_ids = [
     aws_security_group.privatelink.id

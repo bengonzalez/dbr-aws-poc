@@ -39,6 +39,11 @@ module "workspace_endpoints" {
   s3_bucket_arns      = [aws_s3_bucket.workspace_root.arn]
   enable_kms_endpoint = var.encryption.workspace == "customer_managed"
 
+  interface_endpoint_subnet_ids   = var.existing_endpoint_subnet_ids
+  existing_s3_gateway_endpoint_id = var.existing_s3_gateway_endpoint_id
+  existing_sts_endpoint_id        = var.existing_sts_endpoint_id
+  existing_kms_endpoint_id        = var.existing_kms_endpoint_id
+
   tags = local.common_tags
 }
 
@@ -63,6 +68,7 @@ module "workspace_privatelink" {
 
   vpc_id                      = module.workspace_network.vpc_id
   private_subnet_ids          = module.workspace_network.private_subnet_ids
+  endpoint_subnet_ids         = var.existing_endpoint_subnet_ids
   workspace_security_group_id = module.workspace_network.security_group_id
 
   tags = local.common_tags

@@ -137,7 +137,9 @@ requirements, security controls, Terraform behavior.
 | `resolver/validate_deployment_azure.py` | **New, §8 milestone 43, live-verified** | Azure checks for the post-apply validation harness, dispatched from `validate_deployment.py` (which now auto-detects the provider via `loader.resolve_normalized_path()`, with an optional `--provider`). It shares that module's statuses, report, evidence and blocking logic. It authenticates through the active `az login` (no `--profile`), so the Unity Catalog catalog check always runs. Checks: workspace provisioning; VNet injection + no public IP (+ the client VNet for `custom`); all three workspace CMKs plus brought-key identity; the UC storage account's key; the metastore; catalog isolation and storage root; the compliance security profile; and centralized audit logging via the per-workspace diagnostic setting. It refuses to run if the shared root is initialized for a different workspace. |
 | `resolver/teardown.py` | **New, §8 milestone 45; live-verified on both clouds (AWS §8 milestone 49)** | `--workspace <name> [--provider] [--yes] [--purge-files]`. Destroys one workspace, including every step a plain `terraform destroy` misses: it inits the right backend itself, `state rm`s the one-way-locked legacy settings, retries known-transient destroy failures, and on Azure deletes the orphaned Databricks-managed resource group. On AWS it stops (with manual steps) on a non-empty S3 bucket or the UC storage-credential lock rather than deleting data. `--purge-files` also removes the empty state object and the generated local files (never the request). |
 | `ci/pipeline.py`, `.gitlab-ci.yml`, `Jenkinsfile`, `ci/README.md` | **New, §8 milestone 48; driver live-verified locally, wrappers not yet run in a real GitLab/Jenkins** | CI for both client toolchains: GitLab for AWS, Jenkins for Azure. `ci/pipeline.py` holds every real step (`changed`/`prepare`/`verify`/`plan`/`apply`). The two wrappers only handle triggers on `workspace-requests/<cloud>/**`, workload identity federation, the manual approval gate and artifacts. `ci/README.md` is the one-time identity setup for each. |
-| `client-vpc-handoff-template.yaml` | **New, 2026-10-26; template only, not consumed by code yet** | Client-facing form for the network a client builds themselves (the Notion "VPC Created by client" spec): VPC, per-AZ edge/compute/backend subnets, private NATs, route tables, TGW, existing endpoints, plus egress/DNS questions. See §10 item #15 for the field mapping and the code changes needed to consume it. |
+| `client-vpc-handoff-template.yaml` | **New, 2026-10-26; consumed since §8 milestone 51** | Client-facing form for the network a client builds themselves (the Notion "VPC Created by client" spec): VPC, per-AZ edge/compute/backend subnets, private NATs, route tables, TGW, existing endpoints, plus egress/DNS questions. Filled copies go in `client-handoffs/aws/<env>/<name>.yaml` and become a request via `resolver/import_client_handoff.py`. |
+| `resolver/import_client_handoff.py` | **New, §8 milestone 51, live-verified** | Filled handoff → `workspace-requests/aws/<env>/<name>.yaml`. Checks the handoff against live AWS first, read-only: VPC CIDRs and DNS, every subnet's VPC/CIDR/AZ, private NATs in their edge subnets, each compute route table associated with its subnet and defaulting to the same-AZ NAT, and the S3 endpoint on both compute route tables. `--skip-aws-checks` checks only the file. |
+| `test-fixtures/aws/client-vpc/` | **New, §8 milestone 51, live-verified** | Terraform root that builds a client-shaped VPC (optional TGW) and writes the filled handoff, plus `demo.sh` (`up`/`down` or single steps) for demos. Own state at the fixed key `fixtures/aws/client-vpc/terraform.tfstate`; one fixture at a time. See its README. |
 | `schemas/` | Working | `workspace-request.schema.json`, `normalized-config.schema.json`, and (as of 2026-10-14, §8 milestone 17) `profile.schema.json` are all actively validated by `resolver/main.py`. `workspace-request.schema.json` gained optional `network.connectivity` (§8 milestone 27); `network.vpc_cidr`/`existing_vpc_id`/`existing_vpc_cidr` (§8 milestone 28); and, §8 milestone 29, `network.existing_security_group_id`, a new top-level `encryption` object (`existing_workspace_storage_key_arn`/`_alias`, `existing_managed_services_key_arn`/`_alias` — the first requester-controlled `encryption` fields; `encryption.workspace`/`application_data` stay entirely profile-derived), `governance.existing_metastore_id` (alongside the milestone-22 `catalog_admin_principal` — the first two requester-controlled `governance` fields), and `cloud.databricks_account_id`. All mirrored into `normalized-config.schema.json` too. The latter's now-dead `network.requirements.subnets.allocation` sub-schema (count/AZs/cidr_source — superseded by real auto-allocation, §8 milestone 28) was removed. No schema for the new `*.deployment.yaml` files yet — deliberate, kept lightweight (plain key-presence checks in `generate_tfvars.py`), see §8. As of §8 milestone 35, `cloud.provider`'s enum gained `"azure"` (both schemas) and `normalized-config.schema.json`'s `cloud.account` pattern was relaxed to accept either a 12-digit AWS account id or a UUID-shaped Azure subscription id - no other schema change was needed since `network.vpc_cidr`/`governance.catalog_admin_principal`/etc. were already cloud-agnostic strings with no AWS-specific pattern. |
 | `profiles/{dev,stage,live}.yaml` | Working, trimmed | Per-environment defaults — `workspace.isolation`, `encryption.*`, `compute.policy`, `logging.*`. Trimmed 2026-10-14 (§8 milestone 15) to only the fields `resolver.py` actually reads; the old `network.architecture` dev/stage/live inconsistency (§5.2) is moot now that `network.*` was removed from every profile entirely — `policies/network.yaml`'s `allowed_strategies` is now the only thing with an opinion on network strategy per environment (§8 milestone 16). |
 | `policies/policies.yaml` | Working | Platform-wide rules the resolver enforces (encryption requirements, UC requirements, network strategy → architecture mapping + per-environment `allowed_strategies`, validation blocking per env), one key per domain (`network_policy`, `security_policy`, `data_policy`, `governance_policy`, `validation_policy`). Trimmed to only the fields `resolver.py` actually reads (§8 milestone 15), gained `network_policy.allowed_strategies` (§8 milestone 16), then merged from five separate files into this one 2026-10-14 (§8 milestone 18 — closes §5.13's config-layer complexity review). |
@@ -4162,6 +4164,73 @@ Priority order agreed on:
       Note that replacing the credential (`-replace`) **drops its
       workspace binding**; a normal re-plan recreates it.
 
+51. **Client-built ("TSA-shape") VPCs on AWS — §10 item #15** (2026-10-26).
+    The client builds the whole network to the Notion "VPC Created by
+    client" spec and returns `client-vpc-handoff-template.yaml`. The
+    factory now consumes it without creating any network plumbing.
+    - **Terraform**:
+      - `workspace-network`: with adopted subnets **and** adopted route
+        tables, no `aws_route_table_association` is created (the client's
+        subnets are already associated; creating one fails with
+        `Resource.AlreadyAssociated`). Instead, a `data.aws_route_table`
+        per subnet checks the association at plan time, in order. Plus a
+        plan-time postcondition that an existing VPC has DNS support and
+        DNS hostnames enabled (milestone 32's apply-time failure).
+      - `workspace-endpoints`: each endpoint is now existing-or-create
+        (`existing_s3_gateway_endpoint_id`/`_sts_`/`_kms_`). A client S3
+        endpoint is checked at plan time to be in the VPC and on every
+        compute route table. Interface endpoints can go in separate
+        subnets (`interface_endpoint_subnet_ids`). The interface security
+        group is created only when an interface endpoint is. `moved`
+        blocks keep the S3/STS/SG addresses for any live state.
+      - `workspace-privatelink`: optional `endpoint_subnet_ids`.
+        Plan-only: TSA isn't Enterprise.
+    - **Request fields** (passthroughs, deployment-file overrides win):
+      `network.existing_endpoint_subnet_ids`,
+      `existing_s3_gateway_endpoint_id`, `existing_sts_endpoint_id`,
+      `existing_kms_endpoint_id`.
+      **Inference change**: naming endpoint subnets makes
+      `endpoints_ownership` `"terraform"` (build whatever's missing,
+      there), even when routing is client-owned. Before, client-owned
+      routing always meant no endpoints at all (milestone 30).
+    - **`resolver/import_client_handoff.py`**: handoff → request after
+      live checks (see §3). Mapping: compute subnets/route tables →
+      `existing_subnet_ids`/`existing_route_table_ids`; backend subnets →
+      `existing_endpoint_subnet_ids`; primary `/27` → `existing_vpc_cidr`;
+      `enterprise_tier: true` → `connectivity: privatelink`. Edge
+      subnets, NATs and the TGW are checked, never consumed.
+    - **`test-fixtures/aws/client-vpc/`**: Terraform for a client-shaped
+      VPC (22 resources: `10.250.0.0/27` + `100.64.0.0/19`, edge
+      `/28`s, compute `/21`s, backend `/26`s, two private NATs, four
+      route tables, S3 endpoint; TGW off by default) that writes the
+      filled handoff. `demo.sh up`/`down` runs the whole flow.
+    - **Verified (TSA, `556940913059`)**:
+      - Fixture applied (22). Import passed the live checks. A tampered
+        handoff (wrong CIDR, swapped NATs) failed with all five specific
+        problems and wrote no request.
+      - `prepare` inferred routing `existing`, endpoints `terraform`,
+        PrivateLink off, no NAT. Plan: **31 to add**, with no subnets,
+        route tables, associations or S3 endpoint; the STS endpoint in
+        the backend subnets; and the Databricks network on the compute
+        subnets.
+      - **Applied on the first try**; validator 4 PASS. Confirmed live
+        the same layout plus the client's route tables untouched.
+        Follow-up plan: **No changes**. Databricks marks the network
+        `WARNED` ("Cannot find Internet Gateway"), a soft check that is
+        expected with private-NAT/TGW egress; the workspace was `RUNNING`.
+      - Regressions: every committed request's generated files
+        byte-identical (`ci/pipeline.py verify`); AWS `isolated-proof`
+        still plans 48, at the new `[0]` endpoint addresses.
+      - Torn down with `./demo.sh down` (`AUTO_APPROVE=1`): workspace,
+        state object and generated files, then the VPC (22). No NAT left.
+    - **Teardown retries**: "network still attached" again needed all 3
+      attempts even at 60s, so `MAX_DESTROY_ATTEMPTS` is now 5.
+    - **Not tested**: clusters (no egress behind the fixture's NAT, and no
+      PrivateLink on TSA); the `moved` blocks against a live state; the
+      TGW branch of the fixture (`TGW=true`).
+    - **Pre-existing, noticed**: `document-ai-stage`/`-live` have requests
+      but were never prepared, so `ci/pipeline.py verify` fails on them.
+
 ## 9. Conventions observed (keep consistent)
 
 - Every top-level cloud-specific location is grouped under a `<cloud>/`
@@ -4263,6 +4332,13 @@ Priority order agreed on:
   -backend-config=../../deployments/azure/<env>/<name>/backend.tfbackend
   -reconfigure -input=false && terraform plan
   -var-file=../../deployments/azure/<env>/<name>/terraform.tfvars.json`.
+- **A client-built AWS VPC** (§8 milestone 51): save their filled
+  `client-vpc-handoff-template.yaml` as
+  `client-handoffs/aws/<env>/<name>.yaml`, run
+  `python resolver/import_client_handoff.py --handoff ... --request-id
+  ... --submitted-by ... --cost-center ...`, review the written request,
+  then `prepare` as usual. For a demo without a client, use
+  `test-fixtures/aws/client-vpc/demo.sh up` / `down`.
 - **Tearing down a workspace**: use `python resolver/teardown.py
   --workspace <name> --yes` (add `--purge-files` for a throwaway) rather
   than a hand-run `terraform destroy` - see §8 milestone 45 for every
@@ -4394,7 +4470,13 @@ deleting it silently.
     - teardown from CI for deleted requests;
     - one job per workspace (dynamic child pipelines / parallel stages);
     - a shared pipeline image.
-15. **Consume a client-built "TSA-shape" VPC (AWS)** (raised 2026-10-26).
+15. **Consume a client-built "TSA-shape" VPC (AWS) — mostly done, see §8
+    milestone 51.** Code changes 1-3, 5 and 6 below are built and
+    live-verified. Still open: **4** (registering a client's own
+    Databricks PrivateLink endpoints; needs an Enterprise account to
+    test) and **7** (validator check that the workspace uses the
+    handed-over subnets). Original plan, kept for reference
+    (raised 2026-10-26):
     The client builds the whole network themselves, to the spec in the
     Notion page's "VPC Created by client" table, and hands it over with
     `client-vpc-handoff-template.yaml` (repo root, client-facing, one
