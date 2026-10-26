@@ -1,0 +1,176 @@
+# Databricks workspace: client VPC handoff
+#
+# Fill in one copy of this file per Databricks workspace, after the
+# VPC described below has been built in your AWS account. We use it to
+# deploy the workspace into your network: the Databricks workspace,
+# its security group, its storage, IAM roles and (when your Databricks
+# account supports it) Databricks PrivateLink endpoints are created by
+# us. Nothing listed in this file is created, changed or deleted by us.
+#
+# How to fill it in:
+#   - Replace every REPLACE-ME. Leave a field empty ("") only where the
+#     comment says it's optional.
+#   - IDs are the AWS resource IDs (vpc-..., subnet-..., rtb-..., nat-...,
+#     tgw-..., tgw-attach-..., vpce-...), not Name tags.
+#   - CIDRs are as configured in AWS (e.g. 100.64.0.0/21).
+#   - List the two availability zones in the same order everywhere.
+#
+# Expected build (for reference):
+#   Object                      Qty  Specification
+#   VPC                         1    Primary CIDR is the unique /27. DNS support
+#                                    and DNS hostnames enabled.
+#   Secondary CIDR association  1    100.64.0.0/19.
+#   Edge subnets                2    /28 per AZ, from the routable /27.
+#   Compute subnets             2    /21 per AZ, from the non-routable secondary CIDR.
+#   Backend subnets             2    /26 per AZ, from the secondary CIDR.
+#   Private NAT gateways        2    One per edge subnet. No Elastic IP, no
+#                                    internet gateway.
+#   Transit Gateway attachment  1    In the edge subnets. Default route table
+#                                    propagation off.
+#   TGW static route            1 per TGW route table: /27 to this attachment.
+#   Route tables                4    Compute (2): S3 endpoint and 0.0.0.0/0 to the
+#                                    NAT in the same AZ. Edge (1): 0.0.0.0/0 to the
+#                                    TGW. Backend (1): local only.
+#   S3 gateway endpoint         1    Attached to both compute route tables.
+
+handoff_version: 1
+
+# ---------------------------------------------------------------------------
+# Who and what this VPC is for
+# ---------------------------------------------------------------------------
+workspace:
+  # The workspace name agreed with us (lowercase letters, digits, hyphens).
+  name: REPLACE-ME
+  # dev | stage | live
+  environment: REPLACE-ME
+  # Application this workspace serves.
+  application: REPLACE-ME
+
+contacts:
+  # Who to ask about this network (routing, firewall, TGW).
+  network_owner_name: REPLACE-ME
+  network_owner_email: REPLACE-ME
+
+# ---------------------------------------------------------------------------
+# Accounts
+# ---------------------------------------------------------------------------
+aws:
+  # 12-digit AWS account id that holds the VPC.
+  account_id: "REPLACE-ME"
+  # e.g. us-east-1
+  region: REPLACE-ME
+
+databricks:
+  # Databricks account id (UUID) the workspace should be registered in.
+  # Optional - leave "" if we're providing the Databricks account.
+  account_id: ""
+  # Is that Databricks account on the Enterprise tier? true | false | unknown
+  # Enterprise is required for Databricks PrivateLink; without it, cluster
+  # traffic to the Databricks control plane goes out through your NAT/TGW
+  # egress path instead.
+  enterprise_tier: unknown
+
+# ---------------------------------------------------------------------------
+# VPC
+# ---------------------------------------------------------------------------
+vpc:
+  id: vpc-REPLACE-ME
+  # The unique, routable /27.
+  primary_cidr: REPLACE-ME
+  # Expected: 100.64.0.0/19
+  secondary_cidr: 100.64.0.0/19
+  # Both must be true (needed for private DNS on VPC endpoints).
+  dns_support_enabled: true
+  dns_hostnames_enabled: true
+
+# ---------------------------------------------------------------------------
+# Per availability zone (exactly two entries, same order everywhere)
+# ---------------------------------------------------------------------------
+availability_zones:
+  - name: REPLACE-ME            # e.g. us-east-1a
+    edge_subnet:
+      id: subnet-REPLACE-ME
+      cidr: REPLACE-ME          # /28 from the primary CIDR
+    compute_subnet:
+      id: subnet-REPLACE-ME
+      cidr: REPLACE-ME          # /21 from the secondary CIDR
+      route_table_id: rtb-REPLACE-ME   # this AZ's compute route table
+    backend_subnet:
+      id: subnet-REPLACE-ME
+      cidr: REPLACE-ME          # /26 from the secondary CIDR
+    private_nat_gateway_id: nat-REPLACE-ME   # the NAT in this AZ's edge subnet
+
+  - name: REPLACE-ME            # e.g. us-east-1b
+    edge_subnet:
+      id: subnet-REPLACE-ME
+      cidr: REPLACE-ME
+    compute_subnet:
+      id: subnet-REPLACE-ME
+      cidr: REPLACE-ME
+      route_table_id: rtb-REPLACE-ME
+    backend_subnet:
+      id: subnet-REPLACE-ME
+      cidr: REPLACE-ME
+    private_nat_gateway_id: nat-REPLACE-ME
+
+# ---------------------------------------------------------------------------
+# Shared route tables (one each, used by both AZs)
+# ---------------------------------------------------------------------------
+route_tables:
+  edge_route_table_id: rtb-REPLACE-ME      # 0.0.0.0/0 -> Transit Gateway
+  backend_route_table_id: rtb-REPLACE-ME   # local only
+
+# ---------------------------------------------------------------------------
+# Transit Gateway
+# ---------------------------------------------------------------------------
+transit_gateway:
+  id: tgw-REPLACE-ME
+  attachment_id: tgw-attach-REPLACE-ME
+  # Is the TGW (and its route tables) owned by this same AWS account?
+  # true | false. If false, the /27 static routes are created by the TGW
+  # owner - confirm below that they exist.
+  route_tables_in_this_account: REPLACE-ME
+  # TGW route tables that have the /27 -> this attachment static route.
+  # Optional - leave [] if the TGW lives in another account.
+  route_table_ids_with_static_route: []
+  static_routes_in_place: REPLACE-ME       # true | false
+
+# ---------------------------------------------------------------------------
+# VPC endpoints already in this VPC
+# ---------------------------------------------------------------------------
+vpc_endpoints:
+  # The S3 gateway endpoint attached to both compute route tables.
+  s3_gateway_endpoint_id: vpce-REPLACE-ME
+  # Any interface endpoints you have already created in this VPC.
+  # Optional - leave "" for each one that doesn't exist; we create
+  # what's missing in the backend subnets.
+  sts_interface_endpoint_id: ""
+  kms_interface_endpoint_id: ""
+  # Only if your Databricks account is Enterprise and you manage these
+  # centrally yourselves.
+  databricks_rest_api_endpoint_id: ""
+  databricks_scc_relay_endpoint_id: ""
+
+# ---------------------------------------------------------------------------
+# Egress and DNS - please confirm
+# ---------------------------------------------------------------------------
+egress:
+  # Outbound traffic from the compute subnets leaves through the private
+  # NAT -> Transit Gateway. Does that path (including any firewall or
+  # proxy behind the TGW) allow HTTPS to the Databricks control plane,
+  # AWS STS/KMS, and the Databricks-hosted artifact/log storage for this
+  # region? true | false | unknown
+  databricks_control_plane_allowed: unknown
+  # Firewall/proxy that inspects this traffic, if any. Optional.
+  inspection_device: ""
+
+dns:
+  # Does the VPC use the Amazon-provided resolver (AmazonProvidedDNS)?
+  # true | false. If false, describe the resolver/forwarding rules in notes.
+  amazon_provided_dns: true
+
+# ---------------------------------------------------------------------------
+# Anything else we should know (change windows, tagging rules, SCPs that
+# might block resource creation, etc.)
+# ---------------------------------------------------------------------------
+notes: ""
